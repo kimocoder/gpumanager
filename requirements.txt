@@ -7,3 +7,5 @@
 # No mandatory runtime Python dependencies
 
 matplotlib
+openvino
+pyopencl

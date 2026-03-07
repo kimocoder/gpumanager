@@ -86,9 +86,19 @@ class IntelBenchmark(Benchmark):
     def report(self, results):
         device = results.get("device")
         if "gflops" in results:
-            return f"Intel CPU {device.get('name')}: {results['gflops']:.2f} GFLOPS (avg time {results['time_s']:.3f}s)"
+            return (
+                f"Intel CPU {device.get('name')}: {results['gflops']:.2f} GFLOPS "
+                f"(avg time {results['time_s']:.3f}s)"
+            )
         if "stress_gflops" in results:
-            return f"Intel CPU {device.get('name')}: Stress {results['stress_gflops']:.2f} GFLOPS over {results.get('samples')} runs"
+            return (
+                f"Intel CPU {device.get('name')}: Stress "
+                f"{results['stress_gflops']:.2f} GFLOPS over "
+                f"{results.get('samples')} runs"
+            )
         if "memory_bandwidth_MB_s" in results:
-            return f"Intel Device {device.get('name')}: Memory Bandwidth {results['memory_bandwidth_MB_s']:.2f} MB/s"
+            return (
+                f"Intel Device {device.get('name')}: Memory Bandwidth "
+                f"{results['memory_bandwidth_MB_s']:.2f} MB/s"
+            )
         return f"Intel Device: {results.get('result', 'Unknown result')}"

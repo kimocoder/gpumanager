@@ -51,7 +51,10 @@ class VulkanBenchmark(Benchmark):
                 local_size = device.get('local_size', 64)
                 shader = device.get('shader')
                 enable_validation = device.get('validation', False)
-                ok, out = run_runner(count=count, local_size=local_size, shader=shader, enable_validation=bool(enable_validation))
+                ok, out = run_runner(
+                    count=count, local_size=local_size, shader=shader,
+                    enable_validation=bool(enable_validation)
+                )
                 if ok and isinstance(out, dict):
                     out['device'] = device
                     return out

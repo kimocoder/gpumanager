@@ -15,3 +15,6 @@ nvidia_manager.egg-info
 .pytest_cache
 .ruff_cache
 .venv
+.claude
+.kiro
+.vscode

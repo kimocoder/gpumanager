@@ -82,7 +82,10 @@ def save_results(results):
             bench = r.get('benchmark', 'unknown')
             device = json.dumps(r.get('device', {}))
             result = json.dumps(r)
-            cur.execute('INSERT INTO runs (ts, benchmark, device, result_json) VALUES (?,?,?,?)', (ts, bench, device, result))
+            cur.execute(
+                'INSERT INTO runs (ts, benchmark, device, result_json) '
+                'VALUES (?,?,?,?)', (ts, bench, device, result)
+            )
         conn.commit()
         conn.close()
     except Exception:

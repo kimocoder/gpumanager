@@ -23,21 +23,33 @@ class NvidiaBenchmark(Benchmark):
             return {"device": None, "result": "No device"}
         idx = device["index"]
         if test_type == "utilization":
-            out, _, rc = run_cmd(["nvidia-smi", f"--query-gpu=utilization.gpu", f"--format=csv,noheader,nounits", f"-i", str(idx)])
+            out, _, rc = run_cmd([
+                "nvidia-smi", f"--query-gpu=utilization.gpu",
+                f"--format=csv,noheader,nounits", f"-i", str(idx)
+            ])
             if rc != 0 or not out:
                 return {"device": device, "result": "Error"}
             return {"device": device, "gpu_utilization": out.strip()}
         elif test_type == "stress":
             utilizations = []
             for _ in range(stress_iterations):
-                out, _, rc = run_cmd(["nvidia-smi", f"--query-gpu=utilization.gpu", f"--format=csv,noheader,nounits", f"-i", str(idx)])
+                out, _, rc = run_cmd([
+                    "nvidia-smi", f"--query-gpu=utilization.gpu",
+                    f"--format=csv,noheader,nounits", f"-i", str(idx)
+                ])
                 if rc == 0 and out:
                     utilizations.append(int(out.strip()))
                 time.sleep(0.2)
             avg_util = sum(utilizations) / len(utilizations) if utilizations else 0
-            return {"device": device, "avg_utilization": avg_util, "samples": utilizations}
+            return {
+                "device": device, "avg_utilization": avg_util,
+                "samples": utilizations
+            }
         elif test_type == "memory_bandwidth":
-            out, _, rc = run_cmd(["nvidia-smi", f"--query-gpu=memory.used,memory.total", f"--format=csv,noheader,nounits", f"-i", str(idx)])
+            out, _, rc = run_cmd([
+                "nvidia-smi", f"--query-gpu=memory.used,memory.total",
+                f"--format=csv,noheader,nounits", f"-i", str(idx)
+            ])
             if rc != 0 or not out:
                 return {"device": device, "result": "Error"}
             used, total = out.split(",")
@@ -53,7 +65,10 @@ class NvidiaBenchmark(Benchmark):
         elif "avg_utilization" in results:
             avg = results.get("avg_utilization", "N/A")
             samples = results.get("samples", [])
-            return f"NVIDIA GPU {device['name']} (index {device['index']}): Avg Utilization {avg}% over {len(samples)} samples"
+            return (
+                f"NVIDIA GPU {device['name']} (index {device['index']}): "
+                f"Avg Utilization {avg}% over {len(samples)} samples"
+            )
         elif "memory_used" in results:
             used = results.get("memory_used", "N/A")
             total = results.get("memory_total", "N/A")

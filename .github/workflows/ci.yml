@@ -35,26 +35,6 @@ jobs:
         run: |
           export PYTHONPATH=.
           .venv/bin/pytest -q
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: ${{ matrix.python-version }}
-      - name: Cache pip
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('**/requirements-dev.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-${{ matrix.python-version }}
-      - name: Install dependencies
-        run: |
-          python -m venv .venv
-          .venv/bin/pip install -U pip
-          .venv/bin/pip install -r requirements-dev.txt || true
-      - name: Run tests
-        run: |
-          export PYTHONPATH=.
-          .venv/bin/pytest -q
 
   build-runner:
     runs-on: ubuntu-latest
@@ -131,9 +111,26 @@ jobs:
           chmod +x "$ART_RUNNER"
           echo "Runner path: $ART_RUNNER"
           file "$ART_RUNNER" || true
-          echo "Running health-check (may require Vulkan drivers to run successfully)"
       - name: Install Vulkan runtime libs (best-effort)
         run: |
+          sudo apt-get update
+          # Install minimal runtime libs for Vulkan; linking in build stage covered compile-time
+          sudo apt-get install -y libvulkan1 || true
+      - name: Run runner health-check
+        run: |
+          set -x
+          # choose the artifact runner path we validated earlier
+          if [ -f artifacts/benchmarks/vulkan_compute/runner ]; then
+            ART_RUNNER=artifacts/benchmarks/vulkan_compute/runner
+          elif [ -f artifacts/runner ]; then
+            ART_RUNNER=artifacts/runner
+          else
+            echo "ERROR: runner not present"
+            exit 1
+          fi
+          chmod +x "$ART_RUNNER"
+          # Attempt a lightweight health-check; fail on non-zero to signal CI problems
+          "$ART_RUNNER" --health-check || ( echo "Runner health-check failed (exit $?), see above"; exit 1 )
           sudo apt-get update
           # Install minimal runtime libs for Vulkan; linking in build stage covered compile-time
           sudo apt-get install -y libvulkan1 || true

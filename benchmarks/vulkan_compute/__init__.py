@@ -17,22 +17,40 @@ _proc = None
 def has_runner() -> bool:
     return os.path.isfile(RUNNER) and os.access(RUNNER, os.X_OK)
 
-def run_runner(count: int = 1024*64, local_size: int = 64, shader: Optional[str] = None, enable_validation: bool = False, timeout: int = 120, protocol: str = 'ndjson') -> tuple[bool, object]:
+def run_runner(
+    count: int = 1024*64, local_size: int = 64, shader: Optional[str] = None,
+    enable_validation: bool = False, timeout: int = 120, protocol: str = 'ndjson',
+    launcher: Optional[str] = None
+) -> tuple[bool, object]:
     """Launch the native runner as a subprocess and return (success, parsed_output_or_text).
 
-    This function starts the runner and waits for it to complete up to `timeout` seconds.
-    The global process handle is stored so it can be terminated by `kill_runner()`.
+    This function starts the runner and waits for it to complete up to `timeout`
+    seconds. The global process handle is stored so it can be terminated by
+    `kill_runner()`.
     """
     global _proc
     if not has_runner():
         return False, 'runner missing'
-    args = [RUNNER, '--count', str(count), '--local-size', str(local_size), '--protocol', str(protocol)]
+    args = [
+        RUNNER, '--count', str(count), '--local-size', str(local_size),
+        '--protocol', str(protocol)
+    ]
     if shader:
         args += ['--shader', shader]
     if enable_validation:
         args += ['--enable-validation']
+    if launcher and launcher != 'native':
+        # prefix with launcher command, e.g. ['mangohud', RUNNER, ...]
+        if launcher == 'mangohud':
+            args = ['mangohud'] + args
+        elif launcher == 'goverlay':
+            args = ['goverlay'] + args
     try:
-        _proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        # Start in a new process group so we can kill children reliably.
+        _proc = subprocess.Popen(
+            args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, preexec_fn=os.setsid
+        )
         try:
             out, err = _proc.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
@@ -67,7 +85,11 @@ def health_check(timeout: int = 10) -> tuple[bool, object]:
     except Exception as e:
         return False, str(e)
 
-def run_runner_stream(count: int = 1024*64, local_size: int = 64, shader: Optional[str] = None, enable_validation: bool = False, protocol: str = 'ndjson') -> Optional[subprocess.Popen]:
+def run_runner_stream(
+    count: int = 1024*64, local_size: int = 64, shader: Optional[str] = None,
+    enable_validation: bool = False, protocol: str = 'ndjson',
+    launcher: Optional[str] = None
+) -> Optional[subprocess.Popen]:
     """Launch the runner subprocess and return the Popen handle for streaming output.
 
     Caller may read proc.stdout/err lines. To terminate, call kill_runner().
@@ -81,7 +103,12 @@ def run_runner_stream(count: int = 1024*64, local_size: int = 64, shader: Option
     if enable_validation:
         args += ['--enable-validation']
     try:
-        _proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if launcher and launcher != 'native':
+            if launcher == 'mangohud':
+                args = ['mangohud'] + args
+            elif launcher == 'goverlay':
+                args = ['goverlay'] + args
+        _proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, preexec_fn=os.setsid)
         return _proc
     except Exception:
         return None
@@ -92,11 +119,26 @@ def kill_runner():
     if _proc is None:
         return False
     try:
-        _proc.terminate()
+        # try graceful terminate of group
+        try:
+            import signal
+            os.killpg(os.getpgid(_proc.pid), signal.SIGTERM)
+        except Exception:
+            try:
+                _proc.terminate()
+            except Exception:
+                pass
         try:
             _proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
-            _proc.kill()
+            try:
+                import signal
+                os.killpg(os.getpgid(_proc.pid), signal.SIGKILL)
+            except Exception:
+                try:
+                    _proc.kill()
+                except Exception:
+                    pass
         _proc = None
         return True
     except Exception:

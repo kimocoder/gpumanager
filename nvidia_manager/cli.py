@@ -21,7 +21,7 @@ except ImportError:
         """Fallback GUI main function when import fails."""
         return 0
 
-# Lightweight app entrypoint (may be untyped)
+# Lightweight app entrypoint (maybe untyped)
 from .app import main as app_main  # type: ignore[attr-defined]
 
 # Use Any for dynamic dispatch to avoid requiring the whole project to be

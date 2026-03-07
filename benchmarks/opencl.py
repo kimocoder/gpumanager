@@ -60,8 +60,14 @@ class OpenCLBenchmark(Benchmark):
             units = results.get("max_compute_units", "N/A")
             return f"OpenCL Device {device['name']} ({device['platform']}): Compute Units {units}"
         elif "stress_test" in results:
-            return f"OpenCL Device {device['name']} ({device['platform']}): Stress Test {results['stress_test']}"
+            return (
+                f"OpenCL Device {device['name']} ({device['platform']}): "
+                f"Stress Test {results['stress_test']}"
+            )
         elif "memory_bandwidth" in results:
-            return f"OpenCL Device {device['name']} ({device['platform']}): Memory Bandwidth Test {results['memory_bandwidth']}"
+            return (
+                f"OpenCL Device {device['name']} ({device['platform']}): "
+                f"Memory Bandwidth Test {results['memory_bandwidth']}"
+            )
         else:
             return f"OpenCL Device {device['name']} ({device['platform']}): {results.get('result', 'Unknown result')}"

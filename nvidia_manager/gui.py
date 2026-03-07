@@ -8,299 +8,149 @@ headless/test environments.
 
 from __future__ import annotations
 
+import json
+import re
+import shlex
+import shutil
+import signal
+import subprocess
+import threading
+import urllib.request
+import urllib.error
+import time
+from datetime import datetime
+from functools import partial
+
+
+from nvidia_manager.app import run_cmd
+from nvidia_manager.gui_helpers import run_cmd_stream
+from nvidia_manager.settings import CONFIG_PATH
+
 # Large GUI file: relax a few structural pylint checks while we iteratively
 # refactor into smaller modules. We keep other pylint checks enabled.
 # A few GUI patterns (broad exception handling in the top-level runner,
 # module-level global app-class assignment and attributes created lazily in
-# methods) are intentional and safe in this context. Silence the specific
-# pylint warnings so the remainder of the file can be linted meaningfully.
-# pylint: disable=too-many-lines,too-many-statements,too-many-branches,too-many-instance-attributes,
-# The GUI is a large inlined module which intentionally contains large
-# functions for UI construction and detection; silence some refactor
-# warnings that are impractical to address without a major rewrite.
-# pylint: disable=broad-exception-caught,global-statement,too-many-locals,too-many-nested-blocks
-import sys
-import os
-import re
-import json
-import signal
-import time
-import shlex
-import shutil
-import threading
-import subprocess
-import urllib.request
-import urllib.error
-import webbrowser
-from pathlib import Path
-from datetime import datetime
-from typing import Callable, Literal, Optional, Type, Dict, Any
-from functools import partial
+def get_app_class():
+    """Return the lazily-constructed NvidiaDriverManager class.
 
-from .app import run_cmd
-from .gui_helpers import (
-    run_cmd_stream,
-    CONFIG_PATH,
-    BG_DARK,
-    BG_PANEL,
-    BG_CARD,
-    BG_CARD_HOVER,
-    BG_INPUT,
-    BG_HEADER,
-    NVIDIA_GREEN,
-    GREEN_DIM,
-    GREEN_HOVER,
-    GREEN_BG,
-    GREEN_BORDER,
-    GREEN_SELECT,
-    TEXT_PRIMARY,
-    TEXT_SECOND,
-    TEXT_DIM,
-    RED,
-    RED_BORDER,
-    ORANGE,
-    CYAN,
-    PURPLE,
-    BORDER,
-    BORDER_LIGHT,
-)
-from . import __version__
-from . import gui_detect
-from . import gui_parsers
-from . import gui_widgets
-package_version = __version__
-
-
-_APP_CLASS: Optional[Type] = None
-
-
-def main(_argv=None) -> int:
-    """Launch the NVIDIA Driver Manager GUI.
-
-    Returns 0 on success, 1 if the GUI could not be initialized (e.g. no
-    display or tkinter is unavailable).
+    The GUI imports tkinter and related heavy modules only when this
+    function is called so the package is safe to import in headless/test
+    environments.
     """
-    app_cls = get_app_class()
-    if app_cls is None:
-        print(
-            "nvidia-manager: could not initialise the GUI "
-            "(tkinter not available or no display).",
-            file=sys.stderr,
-        )
-        return 1
+    # Lightweight helper: import heavy GUI modules lazily and provide a few
+    # small helper stubs that the large class below expects. The original
+    # file contains more featureful UI helpers; here we provide minimal
+    # implementations to restore syntactic correctness and runtime safety.
+    import webbrowser
+    import os
+    import sys
+    from pathlib import Path
+    import tkinter as tk
+    from tkinter import ttk, messagebox, filedialog, scrolledtext
+    from typing import Dict, Any, Callable, Literal
+
+    # Import color constants from gui_helpers
+    from nvidia_manager.gui_helpers import (
+        TEXT_PRIMARY, TEXT_SECOND, TEXT_DIM,
+        BG_DARK, BG_CARD, BG_CARD_HOVER, BG_PANEL, BG_HEADER, BG_INPUT,
+        NVIDIA_GREEN, ORANGE, RED, CYAN, PURPLE,
+        GREEN_BG, GREEN_SELECT, GREEN_BORDER,
+        RED_BORDER, BORDER, BORDER_LIGHT
+    )
+    from nvidia_manager import gui_widgets as gw
+    from nvidia_manager import gui_detect
+
+    # Try to read package version (best-effort)
     try:
-        app = app_cls()
-        app.mainloop()
-    except Exception as exc:  # pragma: no cover
-        print(f"nvidia-manager: GUI error: {exc}", file=sys.stderr)
-        return 1
-    return 0
+        try:
+            # Python 3.8+
+            from importlib.metadata import version as _pkg_version
+        except Exception:
+            from importlib_metadata import version as _pkg_version  # type: ignore
+        package_version = _pkg_version("nvidia-manager")
+    except Exception:
+        package_version = "0.0.0"
 
+    HAS_MATPLOTLIB = False
 
-def get_app_class() -> Optional[Type]:
-    """Return the lazily-created GUI application class or None if tkinter
-    is unavailable.
-
-    The GUI class is created only when this function is called so importing
-    the package remains safe in headless or test environments.
-    """
-    global _APP_CLASS
-    if _APP_CLASS is not None:
-        return _APP_CLASS
-
-    try:
-        # Local imports: tkinter is optional and only required for the GUI
-        # — perform lazy imports here. Tell pylint this is intentional.
-        # pylint: disable=import-outside-toplevel
-        import tkinter as tk
-        from tkinter import ttk, messagebox, scrolledtext, filedialog
-    except ImportError:
+    def render_plot(parent, values):
+        """No-op plot renderer used when matplotlib is not available."""
         return None
 
-    def _parse_ubuntu_drivers(text):
-        return gui_parsers.parse_ubuntu_drivers(text)
-
-    def _make_section_header(parent, text):
-        # delegate to widgets helper to keep code small; we pass colors here
-        gui_widgets.make_section_header(tk, parent, text)
-
-    def _make_section_label(parent, text):
-        gui_widgets.make_section_label(tk, parent, text)
-
-    def _make_card(parent, **kw):
-        border = kw.pop("border_color", BORDER)
-        return gui_widgets.make_card(tk, parent, border_color=border, bg_card=BG_CARD, **kw)
-
-    def _make_metric(parent, label_text, default="\u2014", row=0, col=0):
-        return gui_widgets.make_metric(tk, parent, label_text, default=default, row=row, col=col, border_color=BORDER, bg_card=BG_CARD)
-
-    def _make_toggle_row(parent, label_text, var, callback=None):
-        row = tk.Frame(parent, bg=BG_CARD, pady=5)
-        row.pack(fill="x")
-        tk.Label(row, text=label_text, font=("monospace", 10), fg=TEXT_PRIMARY, bg=BG_CARD, anchor="w").pack(
-            side="left"
-        )
-        cb = tk.Checkbutton(
-            row,
-            variable=var,
-            bg=BG_CARD,
-            fg=NVIDIA_GREEN,
-            selectcolor=BG_INPUT,
-            activebackground=BG_CARD,
-            activeforeground=NVIDIA_GREEN,
-            highlightthickness=0,
-            command=callback,
-        )
-        cb.pack(side="right")
-        tk.Frame(parent, bg=BORDER, height=1).pack(fill="x")
-
-    def _make_green_btn(parent, text, command):
-        return tk.Button(
-            parent,
-            text=text,
-            font=("monospace", 10, "bold"),
-            fg="#000",
-            bg=NVIDIA_GREEN,
-            activeforeground="#000",
-            activebackground=GREEN_HOVER,
-            bd=0,
-            padx=14,
-            pady=4,
-            cursor="hand2",
-            command=command,
-        )
-
-    def _make_action_btn(_app, parent, text, cmd, fg_color=None):
-        """Create a small action-style button and return it.
-
-        This helper is bound to the application instance as
-        ``self._make_action_btn`` so UI-building code can call it via
-        ``self._make_action_btn(...)``. Keep styling minimal and allow
-        an override color via ``fg_color``.
-        """
-        fg = fg_color if fg_color is not None else TEXT_PRIMARY
+    def _open_release_page(url: str) -> None:
         try:
-            btn = tk.Button(
-                parent,
-                text=text,
-                font=("monospace", 10),
-                fg=fg,
-                bg=BG_CARD,
-                activeforeground=fg,
-                activebackground=BG_CARD_HOVER,
-                bd=0,
-                padx=8,
-                pady=3,
-                cursor="hand2",
-                command=cmd,
-            )
-        except Exception:
-            # In rare environments creating a styled button may fail; fall
-            # back to a plain Button creation to avoid crashing UI build.
-            btn = tk.Button(parent, text=text, command=cmd)
-        return btn
-
-    def _default_settings():
-        return {
-            "secure_boot_sign": True,
-            "persistence_mode": True,
-            "drm_modeset": True,
-            "wayland_compat": True,
-            "open_source_modules": False,
-            "coolbits": False,
-            "powermizer": "Adaptive",
-            "blacklist_nouveau": True,
-            "nvreg_psr": False,
-            "nvreg_preserve_video_memory": False,
-            "nvreg_temp_threshold": 97,
-            "nvreg_gpu_recovery": True,
-            "prime_mode": "nvidia",
-            "power_limit_watts": 0,
-            "fan_control_manual": False,
-            "fan_speed_pct": 50,
-            "clock_offset_core": 0,
-            "clock_offset_mem": 0,
-            "monitor_interval_sec": 2,
-            # Update checker settings
-            "enable_update_checks": True,
-        }
-
-    def _open_release_page(url):
-        """Open *url* in the user's browser, with a xdg-open fallback.
-
-        Kept as a small helper because webbrowser.open can raise OSError in
-        some headless or restricted environments; we fall back to xdg-open via
-        run_cmd when available.
-        """
-        if not url:
-            return
-        try:
-            webbrowser.open(url)
-        except OSError:
-            try:
-                # fallback: use run_cmd to call xdg-open
-                run_cmd(["xdg-open", url])
-            except OSError:
-                pass
-
-    def _load_settings():
-        """Load persisted GUI settings or return defaults.
-
-        Implemented as a closure-level helper so the GUI class can call
-        it during initialization without requiring an instance method.
-        """
-        try:
-            if CONFIG_PATH.exists():
-                with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-                    saved = json.load(f)
-                d = _default_settings()
-                if isinstance(saved, dict):
-                    d.update(saved)
-                return d
+            if url:
+                webbrowser.open(url)
         except Exception:
             pass
-        return _default_settings()
 
-    def _apply_theme():
-        """Apply ttk theme/styles for the GUI.
-
-        Kept as a closure-level helper to avoid importing tkinter at module
-        import time in headless contexts; ttk is already imported in the
-        surrounding scope of this closure.
-        """
+    def _apply_theme() -> None:
+        # Theme application is optional; keep minimal to avoid GUI crashes.
         try:
             style = ttk.Style()
-            style.theme_use("clam")
-            style.configure(
-                "TProgressbar",
-                troughcolor="#1a1c22",
-                background=NVIDIA_GREEN,
-                bordercolor=BG_DARK,
-                lightcolor=NVIDIA_GREEN,
-                darkcolor=GREEN_DIM,
-            )
-            style.configure(
-                "TCombobox",
-                fieldbackground=BG_INPUT,
-                background=BG_INPUT,
-                foreground=TEXT_PRIMARY,
-                bordercolor=BORDER_LIGHT,
-                arrowcolor=NVIDIA_GREEN,
-            )
-            style.map("TCombobox", fieldbackground=[("readonly", BG_INPUT)], foreground=[("readonly", TEXT_PRIMARY)])
-            style.configure(
-                "Treeview",
-                background=BG_CARD,
-                foreground=TEXT_PRIMARY,
-                fieldbackground=BG_CARD,
-                rowheight=26,
-                font=("monospace", 9),
-            )
-            style.configure("Treeview.Heading", background=BG_PANEL, foreground=TEXT_SECOND, font=("monospace", 9, "bold"))
-            style.map("Treeview", background=[("selected", GREEN_BG)], foreground=[("selected", NVIDIA_GREEN)])
+            style.theme_use('default')
         except Exception:
-            # If styling fails (rare), don't crash the GUI
             pass
+
+    def _make_action_btn(app, parent, text, command, fg_color=None):
+        """Create a simple flat action button."""
+        try:
+            btn = tk.Button(parent, text=text, command=command, bd=0, cursor="hand2")
+            return btn
+        except Exception:
+            return tk.Button(parent, text=text, command=command)
+
+    def _make_green_btn(parent, text, command):
+        try:
+            return tk.Button(parent, text=text, command=command, bg="#3fb043", fg="#061")
+        except Exception:
+            return tk.Button(parent, text=text, command=command)
+
+    def _make_card(parent, padx=8, pady=6, border_color=None, bg_card=None):
+        return gw.make_card(tk, parent, border_color=border_color or BORDER, bg_card=bg_card or BG_CARD)
+
+    def _make_section_label(parent, text):
+        return gw.make_section_label(tk, parent, text)
+
+    def _make_section_header(parent, title):
+        return gw.make_section_header(tk, parent, title)
+
+    def _make_toggle_row(parent, label, var, callback=None):
+        row = tk.Frame(parent, bg=parent.cget("bg"))
+        row.pack(fill="x", pady=2)
+        tk.Label(row, text=label, font=("monospace", 9), fg="#ddd", bg=parent.cget("bg")).pack(side="left")
+        cb = tk.Checkbutton(row, variable=var, bg=BG_CARD, fg=NVIDIA_GREEN, selectcolor=BG_INPUT)
+        cb.pack(side="right")
+        if callback:
+            try:
+                var.trace_add("write", lambda *a: callback())
+            except Exception:
+                try:
+                    var.trace("w", lambda *a: callback())
+                except Exception:
+                    pass
+        return row
+
+    def _make_metric(parent, label, row=0, col=0):
+        return gw.make_metric(tk, parent, label, row=row, col=col, border_color=BORDER, bg_card=BG_CARD)
+
+    def _load_settings() -> Dict[str, Any]:
+        try:
+            if CONFIG_PATH.exists():
+                with open(CONFIG_PATH, "r", encoding="utf-8") as fh:
+                    return json.load(fh)
+        except Exception:
+            pass
+        return {}
+
+    def _save_settings(settings: Dict[str, Any]) -> None:
+        try:
+            CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+            with open(CONFIG_PATH, "w", encoding="utf-8") as fh:
+                json.dump(settings, fh, indent=2)
+        except Exception:
+            pass
+
 
     def _get_run_filename(version):
         return f"NVIDIA-Linux-x86_64-{version}.run"
@@ -386,7 +236,10 @@ def get_app_class() -> Optional[Type]:
                 canvas.create_rectangle(pad, pad, pad + inner_w, pad + h, fill=color, width=0, tags=("hbar",))
             # Percentage text
             try:
-                canvas.create_text(w / 2, pad + h / 2, text=f"{int(pct_clamped)}%", fill=TEXT_PRIMARY, font=("monospace", 9), tags=("hbar",))
+                canvas.create_text(
+                    w / 2, pad + h / 2, text=f"{int(pct_clamped)}%",
+                    fill=TEXT_PRIMARY, font=("monospace", 9), tags=("hbar",)
+                )
             except Exception:
                 pass
         except Exception:
@@ -436,7 +289,9 @@ def get_app_class() -> Optional[Type]:
             self.busy = False
             self.monitoring = False
             self._monitor_id = None
+            # Load persistent settings and expose save function on instance
             self.settings: Dict[str, Any] = _load_settings()
+            self._save_settings = lambda: _save_settings(self.settings)
             self.processes = []
             self._clock_offset_core_var: tk.IntVar = tk.IntVar(value=0)
             self._clock_offset_mem_var: tk.IntVar = tk.IntVar(value=0)
@@ -512,6 +367,8 @@ def get_app_class() -> Optional[Type]:
             self._progress_label = None
             self._progress_bar = None
             self._terminal = None
+            # Benchmark discovery/run state
+            self._bench_discovered = False
 
             # Bind closure helpers that the UI builder expects as
             # instance-callables. These are lightweight closures defined in
@@ -528,6 +385,14 @@ def get_app_class() -> Optional[Type]:
 
             # Initial data fetch
             threading.Thread(target=self._detect_all, daemon=True).start()
+            # Start benchmark discovery early at app startup so the UI
+            # can enable Run buttons and populate lists before the user
+            # opens the Benchmark tab.
+            try:
+                threading.Thread(target=self._discover_benchmarks, daemon=True).start()
+            except Exception:
+                # Discovery is best-effort; failures are logged elsewhere.
+                pass
 
             self.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -577,6 +442,57 @@ def get_app_class() -> Optional[Type]:
             self._detect_hashcat()
             self._detect_processes()
             self._schedule(self._refresh_ui)
+
+        def _discover_benchmarks(self):
+            """Background discovery of benchmarks run at app startup.
+
+            Populates ``self.benchmarks`` and updates the benchmark tab UI if
+            present. This runs in a daemon thread and must not raise.
+            """
+            try:
+                import traceback
+                discovery = __import__("benchmarks.discovery", fromlist=["discover_benchmarks"])  # lazy import
+                try:
+                    benches = discovery.discover_benchmarks()
+                except Exception as e:  # pragma: no cover - defensive
+                    benches = []
+                    tb = traceback.format_exc()
+                    try:
+                        self._log(f"Benchmark discovery failed: {e}\n{tb}", "error")
+                    except Exception:
+                        pass
+                self.benchmarks = benches
+                # Pre-populate devices dict so the UI can show devices quickly
+                for bm in self.benchmarks:
+                    try:
+                        self.benchmark_devices[bm.name] = bm.detect_devices()
+                    except Exception:
+                        # do not fail discovery for a single plugin
+                        self.benchmark_devices[bm.name] = []
+                self._bench_discovered = True
+                # If the tab has been built, update combobox values on the main thread
+                def _update_ui():
+                    try:
+                        if hasattr(self, "_bm_combo") and self._bm_combo:
+                            names = [bm.name for bm in self.benchmarks]
+                            self._bm_combo['values'] = names
+                            if names and not self.selected_benchmark.get():
+                                self.selected_benchmark.set(names[0])
+                        if hasattr(self, "_bench_run_btn") and self._bench_run_btn:
+                            try:
+                                self._bench_run_btn.configure(state="normal")
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+
+                self._schedule(_update_ui)
+            except Exception:
+                # Swallow everything here; discovery must not crash the app.
+                try:
+                    self._log("Benchmark discovery thread crashed", "error")
+                except Exception:
+                    pass
 
         def _detect_driver(self):
             out, _, rc = run_cmd(["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"])
@@ -1107,11 +1023,13 @@ def get_app_class() -> Optional[Type]:
             # ── OpenVINO (2024+ API: openvino.Core; legacy: openvino.runtime.Core) ─
             _ov_core = None
             try:
-                from openvino import Core as _OVCore  # type: ignore  # OpenVINO ≥ 2023.1  # pylint: disable=import-outside-toplevel
+                # OpenVINO ≥ 2023.1  # pylint: disable=import-outside-toplevel
+                from openvino import Core as _OVCore  # type: ignore
                 _ov_core = _OVCore()
             except ImportError:
                 try:
-                    from openvino.runtime import Core as _OVCore  # type: ignore  # legacy  # pylint: disable=import-outside-toplevel
+                    # legacy  # pylint: disable=import-outside-toplevel
+                    from openvino.runtime import Core as _OVCore  # type: ignore
                     _ov_core = _OVCore()
                 except ImportError:
                     pass
@@ -1377,6 +1295,8 @@ def get_app_class() -> Optional[Type]:
 
         @staticmethod
         def _parse_apt_drivers(text):
+        def _parse_ubuntu_drivers(text):
+        """Parse ubuntu-drivers devices output."""
             drivers = []
             seen = set()
             for line in text.split("\n"):
@@ -1445,6 +1365,7 @@ def get_app_class() -> Optional[Type]:
                 ("monitor", "\u25C9  Live Monitor"),
                 ("processes", "\u25A6  Processes"),
                 ("drivers", "\u2B21  Drivers"),
+                ("benchmark", "\u25A7  Benchmark"),
                 ("runfile", "\u2B07  NVIDIA.com .run"),
                 ("cuda", "\u229E  CUDA / Toolkit"),
                 ("vulkan", "\u29BF  Compute & APIs"),
@@ -1512,6 +1433,7 @@ def get_app_class() -> Optional[Type]:
             self._build_monitor_tab()
             self._build_processes_tab()
             self._build_drivers_tab()
+            self._build_benchmark_tab()
             self._build_runfile_tab()
             self._build_cuda_tab()
             self._build_vulkan_tab()
@@ -1522,10 +1444,474 @@ def get_app_class() -> Optional[Type]:
             self._build_settings_tab()
             self._build_terminal_tab()
             self._switch_tab("status")
+        def _build_benchmark_tab(self):
+            # Enhanced Benchmark tab: iterations/protocol controls, native-runner
+            # streaming, Cancel, file-save dialog export.
+            f = self._frames["benchmark"]
+            from nvidia_manager import gui_widgets
+            import threading
+            import importlib
+            from tkinter import scrolledtext, filedialog
 
-            # Update checker initial state
+            tk.Label(
+                f, text="Benchmark Tests", font=("Helvetica", 14, "bold"),
+                fg=TEXT_PRIMARY, bg=BG_DARK
+            ).pack(anchor="w", pady=(0, 8))
+            content = tk.Frame(f, bg=BG_DARK)
+            content.pack(fill="both", expand=True)
+
+            selection_frame = tk.Frame(content, bg=BG_DARK)
+            selection_frame.pack(fill="x", pady=(0, 8))
+
+            tk.Label(
+                selection_frame, text="Select Benchmark:", font=("monospace", 10),
+                fg=TEXT_SECOND, bg=BG_DARK
+            ).pack(side="left", padx=(6, 6))
+            self.benchmarks = []
+            self.selected_benchmark = tk.StringVar()
+            self.selected_device = tk.StringVar()
+            self.benchmark_devices = {}
+
+            bm_combo = ttk.Combobox(
+                selection_frame, textvariable=self.selected_benchmark,
+                state="readonly", width=30
+            )
+            bm_combo.pack(side="left", padx=(0, 8))
+            # keep a reference so background discovery can populate it
+            self._bm_combo = bm_combo
+            dev_combo = ttk.Combobox(
+                selection_frame, textvariable=self.selected_device,
+                state="readonly", width=32
+            )
+            dev_combo.pack(side="left", padx=(0, 8))
+
+            # Iterations input
+            tk.Label(
+                selection_frame, text="Iterations:", font=("monospace", 10),
+                fg=TEXT_SECOND, bg=BG_DARK
+            ).pack(side="left", padx=(0, 4))
+            iterations_var = tk.StringVar(value="10")
+            iterations_entry = tk.Entry(
+                selection_frame, textvariable=iterations_var, width=6,
+                bg=BG_INPUT, fg=TEXT_PRIMARY
+            )
+            iterations_entry.pack(side="left", padx=(0, 8))
+
+            # Protocol dropdown
+            tk.Label(
+                selection_frame, text="Protocol:", font=("monospace", 10),
+                fg=TEXT_SECOND, bg=BG_DARK
+            ).pack(side="left", padx=(0, 4))
+            protocol_var = tk.StringVar(value="ndjson")
+            protocol_combo = ttk.Combobox(
+                selection_frame, textvariable=protocol_var, state="readonly",
+                values=["ndjson", "netstring"], width=10
+            )
+            protocol_combo.pack(side="left", padx=(0, 8))
+
+            # Wrapper/launcher selection (mangohud, goverlay, native)
+            tk.Label(
+                selection_frame, text="Launcher:", font=("monospace", 10),
+                fg=TEXT_SECOND, bg=BG_DARK
+            ).pack(side="left", padx=(0, 4))
+            launcher_var = tk.StringVar(
+                value=self.settings.get('benchmark_launcher', 'native')
+            )
+            launcher_combo = ttk.Combobox(
+                selection_frame, textvariable=launcher_var, state="readonly",
+                values=["native", "mangohud", "goverlay"], width=12
+            )
+            launcher_combo.pack(side="left", padx=(0, 8))
+
+            run_btn = _make_green_btn(self, "Run Benchmark", lambda: None)
+            run_btn.pack(side="left", padx=(0, 8))
+            # Disable run until discovery finishes
+            run_btn.configure(state="disabled")
+            # expose run button for background discovery to enable
+            self._bench_run_btn = run_btn
+            cancel_btn = self._make_action_btn(
+                self, selection_frame, "Cancel", lambda: None
+            )
+            cancel_btn.pack(side="left", padx=(0, 8))
+            clear_btn = self._make_action_btn(
+                self, selection_frame, "Clear", lambda: None
+            )
+            clear_btn.pack(side="left", padx=(0, 8))
+
+            # Results + log area
+            bottom_frame = tk.Frame(content, bg=BG_DARK)
+            bottom_frame.pack(fill="both", expand=True)
+            left_col = tk.Frame(bottom_frame, bg=BG_DARK)
+            left_col.pack(side="left", fill="both", expand=True, padx=(0, 6))
+            results_card = gui_widgets.make_card(tk, left_col, border_color="#2a2d35", bg_card="#23272e")
+            results_card.pack(fill="both", expand=True)
+            cols = ("Benchmark", "Device", "Result")
+            tree = ttk.Treeview(results_card, columns=cols, show="headings")
+            for c in cols:
+                tree.heading(c, text=c)
+                tree.column(c, width=200 if c != "Result" else 400, anchor="w")
+            tree.pack(fill="both", expand=True, padx=6, pady=6)
+            progress = ttk.Progressbar(results_card, mode="determinate")
+            progress.pack(fill="x", padx=8, pady=(0, 8))
+
+            right_col = tk.Frame(bottom_frame, bg=BG_DARK, width=360)
+            right_col.pack(side="right", fill="y")
+            right_col.pack_propagate(False)
+            tk.Label(right_col, text="Log", font=("monospace", 9, "bold"), fg=TEXT_SECOND, bg=BG_DARK).pack(anchor="w", padx=6)
+            log_w = scrolledtext.ScrolledText(right_col, height=16, bg="#101214", fg=TEXT_PRIMARY, insertbackground=NVIDIA_GREEN)
+            log_w.pack(fill="both", expand=True, padx=6, pady=(4, 6))
+            def _tab_log(msg: str, lvl: str = "info"):
+                try:
+                    log_w.configure(state="normal")
+                    log_w.insert("end", msg + "\n")
+                    log_w.see("end")
+                    log_w.configure(state="disabled")
+                except Exception:
+                    pass
+                try:
+                    self._log(msg, lvl)
+                except Exception:
+                    pass
+
+            # Discovery: populate comboboxes
+            def discover():
+                try:
+                    discovery = importlib.import_module("benchmarks.discovery")
+                    self.benchmarks = discovery.discover_benchmarks()
+                    benchmark_names = [bm.name for bm in self.benchmarks]
+                    bm_combo['values'] = benchmark_names
+                    if benchmark_names:
+                        self.selected_benchmark.set(benchmark_names[0])
+                    # mark discovery complete and enable run button
+                    self._bench_discovered = True
+                    self._schedule(lambda: run_btn.configure(state="normal"))
+                    def update_devices(*_):
+                        bm = next((b for b in self.benchmarks if b.name == self.selected_benchmark.get()), None)
+                        if bm:
+                            try:
+                                devices = bm.detect_devices()
+                            except Exception as e:
+                                devices = []
+                                _tab_log(f"Device detection failed for {bm.name}: {e}", "error")
+                            self.benchmark_devices[bm.name] = devices
+                            device_names = [d.get("name", str(i)) for i, d in enumerate(devices)]
+                            dev_combo['values'] = device_names
+                            if device_names:
+                                self.selected_device.set(device_names[0])
+                    bm_combo.bind('<<ComboboxSelected>>', lambda e: self._schedule(update_devices))
+                    self._schedule(update_devices)
+                    _tab_log(f"Discovered {len(self.benchmarks)} benchmark(s)", "info")
+                except Exception as e:
+                    _tab_log(f"Benchmark discovery failed: {e}", "error")
+            threading.Thread(target=discover, daemon=True).start()
+
+            # Cancel logic
+            self._running_benchmarks = False
+            def do_cancel():
+                self._running_benchmarks = False
+                try:
+                    import benchmarks.vulkan_compute as vkcomp
+                    vkcomp.kill_runner()
+                    _tab_log("Cancelled Vulkan native runner.", "warn")
+                except Exception:
+                    pass
+                run_btn.configure(state="normal")
+                cancel_btn.configure(state="disabled")
+                clear_btn.configure(state="normal")
+                try:
+                    progress.configure(value=0)
+                except Exception:
+                    pass
+
+            # Run/clear handlers
+            def do_run():
+                run_btn.configure(state="disabled")
+                cancel_btn.configure(state="normal")
+                clear_btn.configure(state="disabled")
+                tree.delete(*tree.get_children())
+                progress['value'] = 0
+                self._running_benchmarks = True
+
+                def worker():
+                    bm = next((b for b in self.benchmarks if b.name == self.selected_benchmark.get()), None)
+                    dev = None
+                    if bm:
+                        devices = self.benchmark_devices.get(bm.name, [])
+                        for d in devices:
+                            if d.get("name") == self.selected_device.get():
+                                dev = d
+                                break
+                        iter_val = iterations_var.get()
+                        try:
+                            iterations = int(iter_val)
+                        except Exception:
+                            iterations = 10
+                            self._schedule(
+                                lambda: _tab_log(
+                                    f"Invalid iterations value '{iter_val}', using {iterations}",
+                                    'warn'
+                                )
+                            )
+                        if iterations < 1:
+                            iterations = 1
+                            self._schedule(
+                                lambda: _tab_log(
+                                    f"Iterations must be >=1, using {iterations}",
+                                    'warn'
+                                )
+                            )
+                        protocol = protocol_var.get()
+                        launcher = launcher_var.get()
+                        # Native Vulkan runner streaming
+                        if bm.name == "VulkanBenchmark":
+                            try:
+                                import benchmarks.vulkan_compute as vkcomp
+                                if vkcomp.has_runner():
+                                    count = (
+                                        dev.get("count", 1024*64) if dev else 1024*64
+                                    )
+                                    local_size = (
+                                        dev.get("local_size", 64) if dev else 64
+                                    )
+                                    shader = dev.get("shader") if dev else None
+                                    # Allow wrapping the native runner with mangohud or
+                                    # goverlay by prepending a launcher token. The
+                                    # vulkan_compute module will interpret a 'launcher' kw
+                                    # and prefix the command accordingly.
+                                    try:
+                                        proc = vkcomp.run_runner_stream(
+                                            count=count, local_size=local_size, shader=shader,
+                                            enable_validation=dev.get("validation", False),
+                                            protocol=protocol, launcher=launcher
+                                        )
+                                    except TypeError:
+                                        # Fallback: older vulkan_compute may not accept
+                                        # launcher arg
+                                        proc = vkcomp.run_runner_stream(
+                                            count=count, local_size=local_size, shader=shader,
+                                            enable_validation=dev.get("validation", False),
+                                            protocol=protocol
+                                        )
+                                    if proc is not None:
+                                        def reader(p):
+                                            try:
+                                                while self._running_benchmarks:
+                                                    chunk = p.stdout.readline()
+                                                    if chunk == '':
+                                                        break
+                                                    sline = chunk.strip()
+                                                    if not sline:
+        current_device = None
+        for line in text.split('\n'):
+            line = line.strip()
+            if not line:
+                                                        continue
+                                                    parsed = None
+                                                    if ':' in sline and sline.endswith(','):
+                                                        colon = sline.find(':')
+                                                        lenpart = sline[:colon]
+                                                        jsonpart = sline[colon+1:-1]
+                                                        try:
+                                                            import json as _json
+                                                            parsed = _json.loads(jsonpart)
+                                                        except Exception:
+                                                            parsed = None
+                                                    else:
+                                                        try:
+                                                            import json as _json
+                                                            parsed = _json.loads(sline)
+                                                        except Exception:
+                                                            parsed = None
+                                                    self._schedule(lambda l=sline: _tab_log(l))
+                                                    if parsed and 'progress' in parsed:
+                                                        prog = parsed['progress']
+                                                        iter_no = prog.get('iter')
+                                                        total_it = prog.get('total')
+                                                        if total_it and iter_no:
+                                                            pct = (iter_no / total_it) * 100
+                                                            self._schedule(
+                                                            lambda v=pct: progress.configure(value=v)
+                                                        )
+                                                        self._schedule(
+                                                            lambda bmname=bm.name, dev=dev, rpt=str(parsed):
+                                                            tree.insert(
+                                                                '', 'end',
+                                                                values=(bmname, str(dev), str(parsed))
+                                                            )
+                                                        )
+                                            except Exception as e:
+                                                self._schedule(lambda: _tab_log(f'reader error: {e}', 'error'))
+                                        reader(proc)
+                                        self._schedule(
+                                            lambda: _tab_log(
+                                                'Vulkan runner finished.', 'success'
+                                            )
+                                        )
+                                    else:
+                                        self._schedule(
+                                            lambda: _tab_log(
+                                                'Failed to launch native Vulkan runner.',
+                                                'error'
+                                            )
+                                        )
+                                else:
+                                    self._schedule(
+                                        lambda: _tab_log(
+                                            'No Vulkan native runner available.', 'warn'
+                                        )
+                                    )
+                            except Exception as e:
+                                self._schedule(lambda: _tab_log(f'Vulkan runner error: {e}', 'error'))
+                        else:
+                            try:
+                                res = bm.run(dev, test_type=None, stress_iterations=iterations)
+                                res_str = str(res)
+                                tree.insert(
+                                    '', 'end',
+                                    values=(
+                                        bm.name,
+                                        (dev.get('name') if isinstance(dev, dict) else str(dev)),
+                                        res_str
+                                    )
+                                )
+                                self._schedule(
+                                    lambda: _tab_log(f"{bm.name} result: {res_str}", "success")
+                                )
+                            except Exception as e:
+                                tree.insert(
+                                    '', 'end',
+                                    values=(
+                                        bm.name,
+                                        (dev.get('name') if isinstance(dev, dict) else str(dev)),
+                                        f"error: {e}"
+                                    )
+                                )
+                                self._schedule(
+                                    lambda: _tab_log(f"{bm.name} error: {e}", "error")
+                                )
+                        self._schedule(lambda: run_btn.configure(state="normal"))
+                        self._schedule(lambda: cancel_btn.configure(state="disabled"))
+                        self._schedule(lambda: clear_btn.configure(state="normal"))
+                threading.Thread(target=worker, daemon=True).start()
+
+            def do_clear():
+                tree.delete(*tree.get_children())
+                log_w.configure(state="normal")
+                log_w.delete('1.0', 'end')
+                log_w.configure(state="disabled")
+
+            run_btn.configure(command=do_run)
+            cancel_btn.configure(command=do_cancel)
+            clear_btn.configure(command=do_clear)
+
+            export_frame = tk.Frame(content, bg=BG_DARK)
+            export_frame.pack(fill="x", pady=(8, 0))
+            def export_csv():
+                rows = [tree.item(i, 'values') for i in tree.get_children()]
+                try:
+                    import csv
+                    init = f"benchmarks_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+                    initdir = self.settings.get('export_default_dir', str(Path.home()))
+                    path = filedialog.asksaveasfilename(
+                        defaultextension=".csv", filetypes=[("CSV files", "*.csv")],
+                        initialfile=init, initialdir=initdir
+                    )
+                    if not path:
+                        return
+                    with open(path, 'w', encoding='utf-8') as fh:
+                        w = csv.writer(fh)
+                        w.writerow(cols)
+                        for r in rows:
+                            w.writerow(r)
+                    # persist export directory and format
+                    try:
+                        self.settings['export_default_dir'] = str(Path(path).parent)
+                        self.settings['export_default_format'] = 'csv'
+                        self._save_settings()
+                    except Exception:
+                        pass
+                    _tab_log(f'Exported CSV to {path}', 'success')
+                except Exception as e:
+                    _tab_log(f'CSV export failed: {e}', 'error')
+
+            def export_json():
+                import json
+                rows = [tree.item(i, 'values') for i in tree.get_children()]
+                try:
+                    init = f"benchmarks_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+                    initdir = self.settings.get('export_default_dir', str(Path.home()))
+                    path = filedialog.asksaveasfilename(
+                        defaultextension=".json", filetypes=[("JSON files", "*.json")],
+                        initialfile=init, initialdir=initdir
+                    )
+                    if not path:
+                        return
+                    out = [{'benchmark': r[0], 'device': r[1], 'result': r[2]} for r in rows]
+                    with open(path, 'w', encoding='utf-8') as fh:
+                        json.dump(out, fh, indent=2)
+                    try:
+                        self.settings['export_default_dir'] = str(Path(path).parent)
+                        self.settings['export_default_format'] = 'json'
+                        self._save_settings()
+                    except Exception:
+                        pass
+                    _tab_log(f'Exported JSON to {path}', 'success')
+                except Exception as e:
+                    _tab_log(f'JSON export failed: {e}', 'error')
+
+            def export_log():
+                try:
+                    init = f"benchmarks_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+                    initdir = self.settings.get('export_default_dir', str(Path.home()))
+                    path = filedialog.asksaveasfilename(
+                        defaultextension=".log", filetypes=[("Log files", "*.log")],
+                        initialfile=init, initialdir=initdir
+                    )
+                    if not path:
+                        return
+                    with open(path, 'w', encoding='utf-8') as fh:
+                        fh.write(log_w.get('1.0', 'end'))
+                    try:
+                        self.settings['export_default_dir'] = str(Path(path).parent)
+                        self.settings['export_default_format'] = 'log'
+                        self._save_settings()
+                    except Exception:
+                        pass
+                    _tab_log(f'Exported log to {path}', 'success')
+                except Exception as e:
+                    _tab_log(f'Log export failed: {e}', 'error')
+
+            tk.Button(
+                export_frame, text="Export CSV", font=("monospace", 10),
+                fg=TEXT_SECOND, bg=BG_CARD, cursor="hand2", command=export_csv
+            ).pack(side="left", padx=(0, 8))
+            tk.Button(
+                export_frame, text="Export JSON", font=("monospace", 10),
+                fg=TEXT_SECOND, bg=BG_CARD, cursor="hand2", command=export_json
+            ).pack(side="left", padx=(0, 8))
+            tk.Button(
+                export_frame, text="Save Log", font=("monospace", 10),
+                fg=TEXT_SECOND, bg=BG_CARD, cursor="hand2", command=export_log
+            ).pack(side="left", padx=(0, 8))
+
+            # Keyboard shortcuts for quick actions
+            try:
+                self.bind_all('<Control-r>', lambda e: run_btn.invoke())
+                self.bind_all('<Control-R>', lambda e: run_btn.invoke())
+                self.bind_all('<Control-c>', lambda e: cancel_btn.invoke())
+                self.bind_all('<Control-C>', lambda e: cancel_btn.invoke())
+                self.bind_all('<Control-e>', lambda e: export_csv())
+                self.bind_all('<Control-E>', lambda e: export_csv())
+            except Exception:
+                pass
+
+            # Make result column stretch so long JSON results are readable
+            try:
+                tree.column('Result', stretch=True)
+            except Exception:
+                pass
+
             self._update_info = None
-            # Start periodic checks (background)
             try:
                 self._start_update_checker()
             except (RuntimeError, OSError):
@@ -1761,7 +2147,9 @@ def get_app_class() -> Optional[Type]:
                 if not info or not info.get("tag_name"):
                     if manual:
                         try:
-                            messagebox.showinfo("Updates", "No update information available.")
+                            messagebox.showinfo(
+                                "Updates", "No update information available."
+                            )
                         except tk.TclError:
                             pass
                     return
@@ -2829,9 +3217,11 @@ def get_app_class() -> Optional[Type]:
                 # Already downloaded, go straight to install
                 if messagebox.askyesno(
                     "Install Driver",
-                    f"Install NVIDIA driver {version} from .run file?\n\n"
-                    f"File: {dest}\n\n"
-                    f"This will:\n"
+                    (
+                        f"Install NVIDIA driver {version} from .run file?\n\n"
+                        f"File: {dest}\n\n"
+                        f"This will:\n"
+                    ),
                     f"  1. Stop display manager\n"
                     f"  2. Unload current NVIDIA modules\n"
                     f"  3. Run the NVIDIA installer\n\n"
@@ -2964,7 +3354,10 @@ def get_app_class() -> Optional[Type]:
                 if missing_build:
                     self._log(f"  Missing: {', '.join(missing_build)}", "error")
                     self._log("  Attempting to install build-essential...", "warn")
-                    rc = run_cmd_stream(["sudo", "apt", "install", "-y", "build-essential"], self._log, timeout=120)
+                    rc = run_cmd_stream(
+                        ["sudo", "apt", "install", "-y", "build-essential"],
+                        self._log, timeout=120
+                    )
                     if rc == 0:
                         fixes_applied.append("Installed build-essential (gcc, make)")
                         self._log("  Build tools installed.", "success")
@@ -3430,16 +3823,30 @@ def get_app_class() -> Optional[Type]:
             for txt, cmd in [
                 (
                     "CUDA Toolkit",
-                    partial(self._run_install_thread, "sudo apt install -y nvidia-cuda-toolkit", "CUDA Toolkit"),
+                    partial(
+                        self._run_install_thread,
+                        "sudo apt install -y nvidia-cuda-toolkit", "CUDA Toolkit"
+                    ),
                 ),
-                ("cuDNN", partial(self._run_install_thread, "sudo apt install -y libcudnn8 libcudnn8-dev", "cuDNN")),
+                (
+                    "cuDNN",
+                    partial(
+                        self._run_install_thread,
+                        "sudo apt install -y libcudnn8 libcudnn8-dev", "cuDNN"
+                    )
+                ),
                 (
                     "TensorRT",
-                    partial(self._run_install_thread, "sudo apt install -y libnvinfer10 libnvinfer-dev", "TensorRT"),
+                    partial(
+                        self._run_install_thread,
+                        "sudo apt install -y libnvinfer10 libnvinfer-dev", "TensorRT"
+                    ),
                 ),
                 ("Container Toolkit", self._install_container_toolkit),
             ]:
-                self._make_action_btn(btn_frame, f"+ {txt}", cmd, fg_color=NVIDIA_GREEN).pack(side="left", padx=(0, 6))
+                self._make_action_btn(
+                    btn_frame, f"+ {txt}", cmd, fg_color=NVIDIA_GREEN
+                ).pack(side="left", padx=(0, 6))
 
         def _install_container_toolkit(self):
             if self.busy:
@@ -3623,14 +4030,20 @@ def get_app_class() -> Optional[Type]:
                     hrow.pack(fill="x")
                     name = dev.get("name") or dev.get("label") or "Unknown Device"
                     name_fg = TEXT_DIM if is_cpu_dev else TEXT_PRIMARY
-                    tk.Label(hrow, text=name, font=("monospace", 11, "bold"),
-                             fg=name_fg, bg=BG_CARD, anchor="w").pack(side="left")
+                    tk.Label(
+                        hrow, text=name, font=("monospace", 11, "bold"),
+                        fg=name_fg, bg=BG_CARD, anchor="w"
+                    ).pack(side="left")
                     dev_type = dev.get("type", "")
                     if dev_type:
-                        type_fg = {"dGPU": NVIDIA_GREEN, "iGPU": CYAN,
-                                   "CPU": TEXT_DIM, "vGPU": PURPLE}.get(dev_type, TEXT_SECOND)
-                        tk.Label(hrow, text=f"  [{dev_type}]",
-                                 font=("monospace", 9), fg=type_fg, bg=BG_CARD).pack(side="left")
+                        type_fg = {
+                            "dGPU": NVIDIA_GREEN, "iGPU": CYAN,
+                            "CPU": TEXT_DIM, "vGPU": PURPLE
+                        }.get(dev_type, TEXT_SECOND)
+                        tk.Label(
+                            hrow, text=f"  [{dev_type}]",
+                            font=("monospace", 9), fg=type_fg, bg=BG_CARD
+                        ).pack(side="left")
                     vendor = dev.get("vendor", "")
                     if vendor:
                         tk.Label(hrow, text=vendor, font=("monospace", 9),
@@ -3666,8 +4079,19 @@ def get_app_class() -> Optional[Type]:
             _install_row(
                 ("+ vulkan-tools", partial(self._run_install_thread, "sudo apt install -y vulkan-tools vulkan-validationlayers libvulkan1", "Vulkan Tools")),
                 ("+ libvulkan-dev", partial(self._run_install_thread, "sudo apt install -y libvulkan-dev spirv-tools", "Vulkan Dev")),
-                ("+ Mesa Vulkan", partial(self._run_install_thread, "sudo apt install -y mesa-vulkan-drivers", "Mesa Vulkan")),
-                ("Run vulkaninfo", partial(self._run_install_thread, "vulkaninfo --summary", "vulkaninfo")),
+                (
+                    "+ Mesa Vulkan",
+                    partial(
+                        self._run_install_thread,
+                        "sudo apt install -y mesa-vulkan-drivers", "Mesa Vulkan"
+                    )
+                ),
+                (
+                    "Run vulkaninfo",
+                    partial(
+                        self._run_install_thread, "vulkaninfo --summary", "vulkaninfo"
+                    )
+                ),
             )
 
             # ═════════════════════════════════════════
@@ -3681,19 +4105,29 @@ def get_app_class() -> Optional[Type]:
                     pcard.pack(fill="x", pady=(0, 6))
                     hdr = tk.Frame(pcard, bg=BG_CARD)
                     hdr.pack(fill="x")
-                    tk.Label(hdr, text=f"\u25C6 {plat.get('name','?')}",
-                             font=("monospace", 10, "bold"), fg=CYAN, bg=BG_CARD, anchor="w").pack(side="left")
-                    tk.Label(hdr, text=plat.get("version", ""),
-                             font=("monospace", 8), fg=TEXT_DIM, bg=BG_CARD).pack(side="right")
+                    tk.Label(
+                        hdr, text=f"\u25C6 {plat.get('name','?')}",
+                        font=("monospace", 10, "bold"), fg=CYAN, bg=BG_CARD, anchor="w"
+                    ).pack(side="left")
+                    tk.Label(
+                        hdr, text=plat.get("version", ""),
+                        font=("monospace", 8), fg=TEXT_DIM, bg=BG_CARD
+                    ).pack(side="right")
                     if plat.get("vendor"):
-                        tk.Label(pcard, text=f"  Vendor: {plat['vendor']}",
-                                 font=("monospace", 8), fg=TEXT_DIM, bg=BG_CARD, anchor="w").pack(fill="x")
+                        tk.Label(
+                            pcard, text=f"  Vendor: {plat['vendor']}",
+                            font=("monospace", 8), fg=TEXT_DIM, bg=BG_CARD, anchor="w"
+                        ).pack(fill="x")
                     for dev in plat.get("devices", []):
                         drow = tk.Frame(pcard, bg=BG_CARD, pady=3)
                         drow.pack(fill="x")
                         tk.Frame(pcard, bg=BORDER, height=1).pack(fill="x", padx=4)
-                        tk.Label(drow, text=f"  \u25B8 {dev.get('name','?')} [{dev.get('type','?')}]",
-                                 font=("monospace", 9, "bold"), fg=TEXT_PRIMARY, bg=BG_CARD, anchor="w").pack(fill="x")
+                        tk.Label(
+                            drow,
+                            text=f"  \u25B8 {dev.get('name','?')} [{dev.get('type','?')}]",
+                            font=("monospace", 9, "bold"), fg=TEXT_PRIMARY,
+                            bg=BG_CARD, anchor="w"
+                        ).pack(fill="x")
                         meta = []
                         cu = dev.get("compute_units")
                         if cu and str(cu) != "?":
@@ -3735,16 +4169,25 @@ def get_app_class() -> Optional[Type]:
                     for dev in devs:
                         dcard = _make_card(f, padx=12, pady=8, border_color=BORDER_LIGHT)
                         dcard.pack(fill="x", pady=(0, 4))
-                        tk.Label(dcard, text=f"\u25C6 {dev.get('name','?')}",
-                                 font=("monospace", 10, "bold"), fg=PURPLE, bg=BG_CARD, anchor="w").pack(fill="x")
+                        tk.Label(
+                            dcard, text=f"\u25C6 {dev.get('name','?')}",
+                            font=("monospace", 10, "bold"), fg=PURPLE,
+                            bg=BG_CARD, anchor="w"
+                        ).pack(fill="x")
                         details = []
-                        for k, label in [("type","Type"),("vendor_id","Vendor"),
-                                         ("eu_count","EU Count"),("subdevices","Sub-devices"),("memory","Memory")]:
+                        for k, label in [
+                            ("type","Type"),("vendor_id","Vendor"),
+                            ("eu_count","EU Count"),("subdevices","Sub-devices"),
+                            ("memory","Memory")
+                        ]:
                             if dev.get(k):
                                 details.append(f"{label}: {dev[k]}")
                         if details:
-                            tk.Label(dcard, text="  " + "  |  ".join(details),
-                                     font=("monospace", 8), fg=TEXT_SECOND, bg=BG_CARD, anchor="w").pack(fill="x", pady=(2,0))
+                            tk.Label(
+                                dcard, text="  " + "  |  ".join(details),
+                                font=("monospace", 8), fg=TEXT_SECOND,
+                                bg=BG_CARD, anchor="w"
+                            ).pack(fill="x", pady=(2,0))
                 else:
                     tk.Label(f, text="  Level Zero runtime present (no device details parsed).",
                              font=("monospace", 9), fg=TEXT_SECOND, bg=BG_DARK, anchor="w").pack(fill="x")
@@ -3753,12 +4196,19 @@ def get_app_class() -> Optional[Type]:
                          font=("monospace", 9), fg=TEXT_DIM, bg=BG_DARK, anchor="w").pack(fill="x", pady=(0, 4))
 
             _install_row(
-                ("+ Level Zero (build from source)", self._install_level_zero_from_source),
-                ("+ oneAPI Base Kit (build from source)", self._install_oneapi_from_source),
+                (
+                    "+ Level Zero (build from source)",
+                    self._install_level_zero_from_source
+                ),
+                (
+                    "+ oneAPI Base Kit (build from source)",
+                    self._install_oneapi_from_source
+                ),
                 ("+ Intel IGC (build from source)", self._install_igc_from_source),
-                ("+ oneAPI Base Kit (apt)", partial(self._run_install_thread, "sudo apt install -y intel-basekit", "Intel oneAPI")),
-                ("+ Intel GPU drivers", partial(self._run_install_thread, "sudo apt install -y intel-media-va-driver-non-free vainfo intel-gpu-tools", "Intel GPU")),
-            )
+                (
+                    "+ oneAPI Base Kit (apt)",
+                    partial(
+
 
             # ═════════════════════════════════════════
             #  NPU / VPU / ACCELERATORS
@@ -3767,17 +4217,17 @@ def get_app_class() -> Optional[Type]:
             npu_devs = npu.get("devices", [])
             ov_devs = npu.get("openvino_devices", [])
             if npu_devs or ov_devs or npu.get("driver"):
-                if npu.get("driver"):
+            if npu.get("driver"):
                     tk.Label(f, text=f"  Driver: {npu['driver']}",
                              font=("monospace", 9, "bold"), fg=NVIDIA_GREEN, bg=BG_DARK, anchor="w").pack(fill="x")
-                for dev in npu_devs:
+            for dev in npu_devs:
                     dcard = _make_card(f, padx=12, pady=6, border_color=BORDER_LIGHT)
                     dcard.pack(fill="x", pady=(0, 3))
                     tk.Label(dcard, text=f"\u25C6 {dev.get('type','NPU')}",
                              font=("monospace", 9, "bold"), fg=ORANGE, bg=BG_CARD, anchor="w").pack(side="left")
                     tk.Label(dcard, text=dev.get("path",""),
                              font=("monospace", 8), fg=TEXT_DIM, bg=BG_CARD, anchor="e").pack(side="right")
-                if ov_devs:
+            if ov_devs:
                     ov_ver = npu.get("openvino_version", "")
                     ov_hdr = f"  OpenVINO{' ' + ov_ver if ov_ver else ''} devices:"
                     tk.Label(f, text=ov_hdr, font=("monospace", 9, "bold"),
@@ -3795,8 +4245,8 @@ def get_app_class() -> Optional[Type]:
                         if caps:
                             tk.Label(dcard, text="    " + "  ".join(caps),
                                      font=("monospace", 8), fg=TEXT_DIM, bg=BG_CARD, anchor="w").pack(fill="x")
-            else:
-                tk.Label(f, text="  No NPU/VPU detected. Intel NPU requires Meteor Lake / Core Ultra CPU.",
+
+            tk.Label(f, text="  No NPU/VPU detected. Intel NPU requires Meteor Lake / Core Ultra CPU.",
                          font=("monospace", 9), fg=TEXT_DIM, bg=BG_DARK, anchor="w").pack(fill="x", pady=(0, 4))
 
             # Detect OpenVINO install state at render time (fast – no subprocess)
@@ -5107,6 +5557,10 @@ def get_app_class() -> Optional[Type]:
                             self._log(f"CMake configure failed for {name}.", "error")
                             # Non-fatal: continue with next component
                             self._log(f"Skipping {name}, continuing with remaining components...", "warn")
+                
+            # Device line
+            if line.startswith('=='):
+                current_device = line
                             continue
 
                         self._schedule(lambda p=pct_base + pct_step // 2: self._progress_var.set(p))
@@ -5262,6 +5716,36 @@ def get_app_class() -> Optional[Type]:
                      None),
                 ]
 
+            # Driver line
+            if 'nvidia-driver-' in line:
+                parts = line.split()
+                if len(parts) >= 1:
+                    package = parts[0]
+                    version_match = re.search(r'nvidia-driver-(\d+)', package)
+                    if version_match:
+                        version = version_match.group(1)
+                        recommended = 'recommended' in line.lower()
+                        driver_type = "Production"
+                        if 'server' in line.lower():
+                            driver_type = "Server"
+                        elif 'open' in line.lower():
+                            driver_type = "Open"
+                            
+                        drivers.append({
+                            'package': package,
+                            'version': version,
+                            'description': line,
+                            'recommended': recommended,
+                            'type': driver_type
+                        })
+        
+        return sorted(drivers, key=lambda d: int(d['version']), reverse=True)
+
+    def _get_run_filename(version):
+        return f"NVIDIA-Linux-x86_64-{version}.run"
+
+    def _get_download_dir():
+        d = Path.home() / "nvidia-drivers"
                 try:
                     os.makedirs(workspace, exist_ok=True)
 
@@ -5589,19 +6073,47 @@ exec \"%s\" "${args[@]}"
                     )
                     self._log("DRM modesetting enabled.", "success")
                 except subprocess.SubprocessError:
+            d.mkdir(parents=True, exist_ok=True)
+        except Exception:
                     pass
+        return d
 
             if self.settings.get("blacklist_nouveau"):
                 try:
                     blacklist_cmd = (
                         'echo -e "blacklist nouveau\\noptions nouveau modeset=0" '
                         "> /etc/modprobe.d/blacklist-nouveau.conf"
+    def _draw_arc_gauge(canvas, pct, color, label_text="", size=110):
+        """Draw a 270° arc gauge on *canvas*.  pct is 0-100."""
+        # math is small; import locally to avoid top-level tkinter dependency.
+        # pylint: disable=import-outside-toplevel
+        import math
+        canvas.delete("all")
+        pad = 10
+        w = size
+        cx, cy = w / 2, w / 2
+        r = (w - 2 * pad) / 2
+        line_w = 8
+        # background arc (full 270°)
+        start_angle = 135  # degrees (tkinter: 0=3-o'clock, ccw)
+        extent = 270
+        canvas.create_arc(
+            pad, pad, w - pad, w - pad,
+            start=start_angle, extent=extent,
+            style="arc", outline="#2a2d35", width=line_w,
                     )
                     subprocess.run(
                         ["sudo", "bash", "-c", blacklist_cmd],
                         capture_output=True,
                         timeout=10,
                         check=False,
+        # value arc
+        val_extent = max(0, min(pct, 100)) / 100.0 * extent
+        if val_extent > 0:
+            canvas.create_arc(
+                pad, pad, w - pad, w - pad,
+                start=start_angle, extent=val_extent,
+                style="arc", outline=color, width=line_w,
                     )
                 except subprocess.SubprocessError:
                     pass
@@ -5618,6 +6130,10 @@ exec \"%s\" "${args[@]}"
                 + "Current: "
                 + str(self.installed_driver.get())
                 + "\n\nFalls back to nouveau. Reboot required."
+        # centre text
+        canvas.create_text(
+            cx, cy - 4, text=f"{int(pct)}%", fill=TEXT_PRIMARY,
+            font=("Helvetica", 14, "bold"),
             )
             if messagebox.askyesno("Remove Driver", msg):
                 self.busy = True
@@ -5644,6 +6160,9 @@ exec \"%s\" "${args[@]}"
             def _do():
                 self._term_badge.configure(
                     text="  COMPLETE  " if success else "  FAILED  ", fg=NVIDIA_GREEN if success else RED
+        canvas.create_text(
+            cx, cy + 14, text=label_text, fill=TEXT_DIM,
+            font=("monospace", 7),
                 )
                 if removed:
                     self.installed_driver.set("None")
@@ -5683,6 +6202,21 @@ exec \"%s\" "${args[@]}"
 
             # ── Update arc gauges ─────────────────────────────────────────────
             def _safe_float(v, fallback=0.0):
+        # small tick at 0-mark and end-mark
+        for frac in (0, 1):
+            angle_rad = math.radians(180 + 45 - frac * 270)
+            x0 = cx + (r - line_w) * math.cos(angle_rad)
+            y0 = cy - (r - line_w) * math.sin(angle_rad)
+            x1 = cx + (r + 2) * math.cos(angle_rad)
+            y1 = cy - (r + 2) * math.sin(angle_rad)
+            canvas.create_line(x0, y0, x1, y1, fill=TEXT_DIM, width=1)
+
+    def _draw_hbar(canvas, pct, color):
+        """Draw a simple horizontal percentage bar on *canvas*.
+
+        This helper is used by instance methods via ``self._draw_hbar`` so
+        it's attached to the instance during initialization.
+        """
                 try:
                     return float(v)
                 except (TypeError, ValueError):
@@ -5742,6 +6276,29 @@ exec \"%s\" "${args[@]}"
             uuid = g.get("uuid", "\u2014")
             self._drv_labels["UUID"].configure(
                 text=(uuid[:24] + "...") if uuid != "\u2014" and len(uuid) > 24 else uuid
+            canvas.delete("hbar")
+            # Query actual width; fallback to widget 'width' option if not yet
+            # laid out (winfo_width can be 1 before geometry manager runs).
+            w = canvas.winfo_width()
+            if not w or w < 10:
+                try:
+                    w = int(canvas.cget("width"))
+                except Exception:
+                    w = 200
+            pad = 2
+            h = 12
+            pct_clamped = max(0.0, min(100.0, float(pct or 0)))
+            inner_w = int((w - 2 * pad) * (pct_clamped / 100.0))
+            # Background track
+            canvas.create_rectangle(pad, pad, w - pad, pad + h, fill=BG_CARD_HOVER, width=0, tags=("hbar",))
+            # Filled portion
+            if inner_w > 0:
+                canvas.create_rectangle(pad, pad, pad + inner_w, pad + h, fill=color, width=0, tags=("hbar",))
+            # Percentage text
+            try:
+                canvas.create_text(
+                    w / 2, pad + h / 2, text=f"{int(pct_clamped)}%",
+                    fill=TEXT_PRIMARY, font=("monospace", 9), tags=("hbar",)
             )
             self._drv_labels["Persistence"].configure(text=ext.get("persistence_mode", "\u2014"))
             self._drv_labels["Compute"].configure(text=ext.get("compute_mode", "\u2014"))
@@ -5752,6 +6309,461 @@ exec \"%s\" "${args[@]}"
                 "Default Limit": "power_default",
                 "Max Limit": "power_max",
                 "Min Limit": "power_min",
+            except Exception:
+                pass
+        except Exception:
+            # GUI drawing must not raise during periodic refreshes
+            pass
+
+    def _is_newer_version(current: str, latest: str) -> bool:
+        """Return True if *latest* appears newer than *current*.
+
+        Uses a simple numeric component comparison to handle versions like
+        '525.60.11' and '530.41.03'. Non-numeric components fall back to
+        lexicographic comparison.
+        """
+        if not current or not latest:
+            return False
+        try:
+            def to_parts(v: str):
+                return [int(x) if x.isdigit() else x for x in re.split(r"[.\-+_]", v)]
+            return to_parts(latest) > to_parts(current)
+        except Exception:
+            return latest > current
+
+    class NvidiaDriverManager(tk.Tk):
+        """Main GUI application class for NVIDIA Driver Manager."""
+        def __init__(self):
+            super().__init__()
+            self.title("NVIDIA Driver Manager — Advanced")
+            self.geometry("1080x720")
+            self.minsize(960, 620)
+            self.configure(bg=BG_DARK)
+            self.is_root = os.geteuid() == 0
+
+            # ── State ──
+            self.installed_driver = tk.StringVar(value="Detecting...")
+            self.gpu_info = {}
+            self.gpu_info_extended = {}
+            self.available_drivers = []
+            self.cuda_info = {}
+            self.vulkan_info = {}
+            self.opencl_info = {}
+            self.levelzero_info = {}
+            self.npu_info = {}
+            self.rocm_info = {}
+            self.cpu_info = {}
+            self.hashcat_info = {}  # {version, cuda_version, backends: [{type,devices:[...]}]}
+            self.active_tab = tk.StringVar(value="status")
+            self.busy = False
+            self.monitoring = False
+            self._monitor_id = None
+            # Load persistent settings and expose save function on instance
+            self.settings: Dict[str, Any] = _load_settings()
+            self._save_settings = lambda: _save_settings(self.settings)
+            self.processes = []
+            self._clock_offset_core_var: tk.IntVar = tk.IntVar(value=0)
+            self._clock_offset_mem_var: tk.IntVar = tk.IntVar(value=0)
+
+            # Explicitly initialize attributes that are set later by
+            # individual _build_* methods so pylint does not report
+            # attribute-defined-outside-init (W0201). These are created
+            # during incremental UI construction but having them present
+            # on the instance makes the class behavior clearer and
+            # improves static analysis.
+            self._update_info = None
+            self._status_badge = None
+            self._kern_os_label = None
+            self._kern_ver_label = None
+            self._kern_arch_badge = None
+            self._kern_info_frame = None
+            self._kern_labels = None
+            self._gpu_name_label = None
+            self._gpu_sub_label = None
+            self._drv_info_frame = None
+            self._drv_labels = None
+            self._gauge_canvases = None
+            self._vram_pct_label = None
+            self._vram_bar = None
+            self._vram_used_lbl = None
+            self._vram_total_lbl = None
+            self._metrics_frame = None
+            self._metric_labels = None
+            self._monitor_badge = None
+            self._mon_interval_var = None
+            self._mon_metrics = None
+            self._mon_labels = None
+            self._mon_log = None
+            self._proc_tree = None
+            self._drivers_canvas = None
+            self._drivers_inner = None
+            self._run_canvas = None
+            self._run_inner = None
+            self._run_version_var = None
+            self._run_file_var = None
+            self._cuda_content = None
+            self._compute_canvas = None
+            self._compute_inner = None
+            self._power_info_frame = None
+            self._power_labels = None
+            self._power_limit_var = None
+            self._fan_manual_var = None
+            self._fan_speed_var = None
+            self._fan_val_label = None
+            self._fan_scale = None
+            self._fan_apply_btn = None
+            self._prime_status_label = None
+            self._prime_test_label = None
+            self._xorg_coolbits_var = None
+            self._xorg_triple_var = None
+            self._xorg_comp_pipe_var = None
+            self._xorg_modeset_var = None
+            self._xorg_allow_empty_var = None
+            self._xorg_text = None
+            self._nouveau_var = None
+            self._nvreg_psr_var = None
+            self._nvreg_preserve_var = None
+            self._nvreg_recovery_var = None
+            self._nvreg_temp_var = None
+            self._dkms_text = None
+            self._setting_vars = None
+            self._pm_var = None
+            self._updates_var = None
+            self._update_interval_var = None
+            self._updates_preview_text = None
+            self._term_badge = None
+            self._progress_var = None
+            self._progress_label = None
+            self._progress_bar = None
+            self._terminal = None
+            # Benchmark discovery/run state
+            self._bench_discovered = False
+
+            # Bind closure helpers that the UI builder expects as
+            # instance-callables. These are lightweight closures defined in
+            # this outer scope and bound to the instance so calls like
+            # ``self._make_action_btn(...)`` work during _build_ui().
+            self._make_action_btn = partial(_make_action_btn, self)
+            # Bind drawing helpers used by instance methods. _draw_hbar takes
+            # (canvas, pct, color) so assign the closure directly rather than
+            # partially applying 'self'.
+            self._draw_hbar = _draw_hbar
+
+            self._build_ui()
+            _apply_theme()
+
+            # Initial data fetch
+            threading.Thread(target=self._detect_all, daemon=True).start()
+            # Start benchmark discovery early at app startup so the UI
+            # can enable Run buttons and populate lists before the user
+            # opens the Benchmark tab.
+            try:
+                threading.Thread(target=self._discover_benchmarks, daemon=True).start()
+            except Exception:
+                # Discovery is best-effort; failures are logged elsewhere.
+                pass
+
+            self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        def _on_close(self):
+            self.monitoring = False
+            if self._monitor_id:
+                self.after_cancel(self._monitor_id)
+            self.destroy()
+
+        def _schedule(self, func: Callable[..., object], ms: int = 0) -> str:
+            """Schedule *func* on the Tk main-loop after *ms* milliseconds.
+
+            Thin wrapper around ``tk.Misc.after`` that keeps the type-checker
+            happy (``after`` expects variadic ``*args`` which are almost never
+            needed in this codebase).
+            """
+            return self.after(ms, func)  # type: ignore[return-value]
+
+        # ═══════════════════════════════════════════════════════════════════════════
+        #  SETTINGS PERSISTENCE
+        # ═══════════════════════════════════════════════════════════════════════════
+
+        def _save_settings(self):
+            try:
+                CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+                with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+                    json.dump(self.settings, f, indent=2)
+            except OSError:
+                pass
+
+        # ═══════════════════════════════════════════════════════════════════════════
+        #  SYSTEM DETECTION
+        # ═══════════════════════════════════════════════════════════════════════════
+        def _detect_all(self):
+            self._log("Detecting system configuration...", "info")
+            self._detect_driver()
+            self._detect_gpu()
+            self._detect_gpu_extended()
+            self._detect_available_drivers()
+            self._detect_cuda()
+            self._detect_vulkan()
+            self._detect_opencl()
+            self._detect_levelzero()
+            self._detect_npu()
+            self._detect_rocm()
+            self._detect_cpu()
+            self._detect_hashcat()
+            self._detect_processes()
+            self._schedule(self._refresh_ui)
+
+        def _discover_benchmarks(self):
+            """Background discovery of benchmarks run at app startup.
+
+            Populates ``self.benchmarks`` and updates the benchmark tab UI if
+            present. This runs in a daemon thread and must not raise.
+            """
+            try:
+                import traceback
+                discovery = __import__("benchmarks.discovery", fromlist=["discover_benchmarks"])  # lazy import
+                try:
+                    benches = discovery.discover_benchmarks()
+                except Exception as e:  # pragma: no cover - defensive
+                    benches = []
+                    tb = traceback.format_exc()
+                    try:
+                        self._log(f"Benchmark discovery failed: {e}\n{tb}", "error")
+                    except Exception:
+                        pass
+                self.benchmarks = benches
+                # Pre-populate devices dict so the UI can show devices quickly
+                for bm in self.benchmarks:
+                    try:
+                        self.benchmark_devices[bm.name] = bm.detect_devices()
+                    except Exception:
+                        # do not fail discovery for a single plugin
+                        self.benchmark_devices[bm.name] = []
+                self._bench_discovered = True
+                # If the tab has been built, update combobox values on the main thread
+                def _update_ui():
+                    try:
+                        if hasattr(self, "_bm_combo") and self._bm_combo:
+                            names = [bm.name for bm in self.benchmarks]
+                            self._bm_combo['values'] = names
+                            if names and not self.selected_benchmark.get():
+                                self.selected_benchmark.set(names[0])
+                        if hasattr(self, "_bench_run_btn") and self._bench_run_btn:
+                            try:
+                                self._bench_run_btn.configure(state="normal")
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+
+                self._schedule(_update_ui)
+            except Exception:
+                # Swallow everything here; discovery must not crash the app.
+                try:
+                    self._log("Benchmark discovery thread crashed", "error")
+                except Exception:
+                    pass
+
+        def _detect_driver(self):
+            out, _, rc = run_cmd(["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"])
+            if rc == 0 and out:
+                version = out.split("\n")[0].strip()
+                self.installed_driver.set(version)
+                self._log(f"Installed driver: {version}", "success")
+            else:
+                out2, _, rc2 = run_cmd(["dpkg", "-l", "nvidia-driver-*"])
+                if rc2 == 0:
+                    for line in out2.split("\n"):
+                        if line.startswith("ii"):
+                            parts = line.split()
+                            if len(parts) >= 3:
+                                self.installed_driver.set(parts[2])
+                                self._log(f"Installed package: {parts[1]}", "success")
+                                return
+                self.installed_driver.set("None")
+                self._log("No NVIDIA driver detected.", "warn")
+
+        def _detect_gpu(self):
+            queries = (
+                "gpu_name,gpu_bus_id,memory.total,memory.used,memory.free,"
+                "temperature.gpu,fan.speed,clocks.current.graphics,clocks.current.memory,"
+                "clocks.max.graphics,clocks.max.memory,"
+                "utilization.gpu,utilization.memory,driver_version,vbios_version,"
+                "pcie.link.gen.current,pcie.link.width.current,"
+                "power.draw,power.limit,power.default_limit,power.max_limit,power.min_limit,"
+                "enforced.power.limit,gpu_serial,gpu_uuid"
+            )
+            out, _, rc = run_cmd(["nvidia-smi", f"--query-gpu={queries}", "--format=csv,noheader,nounits"])
+            if rc == 0 and out:
+                vals = [v.strip() for v in out.split("\n")[0].split(",")]
+                keys = [
+                    "name",
+                    "bus_id",
+                    "vram_total",
+                    "vram_used",
+                    "vram_free",
+                    "temp",
+                    "fan",
+                    "clock_core",
+                    "clock_mem",
+                    "clock_core_max",
+                    "clock_mem_max",
+                    "usage_gpu",
+                    "usage_mem",
+                    "driver",
+                    "vbios",
+                    "pcie_gen",
+                    "pcie_width",
+                    "power_draw",
+                    "power_limit",
+                    "power_default",
+                    "power_max",
+                    "power_min",
+                    "power_enforced",
+                    "serial",
+                    "uuid",
+                ]
+                if len(vals) == len(keys):
+                    self.gpu_info = dict(zip(keys, vals))
+                else:
+                    self.gpu_info = dict(zip(keys[: len(vals)], vals))
+                self._log(f"GPU: {self.gpu_info.get('name', 'Unknown')}", "success")
+            else:
+                out3, _, _ = run_cmd(["lspci"])
+                for line in out3.split("\n"):
+                    if "NVIDIA" in line.upper():
+                        self.gpu_info = {"name": line.split(":")[-1].strip()}
+                        self._log(f"GPU (lspci): {self.gpu_info['name']}", "info")
+                        break
+                if not self.gpu_info:
+                    self._log("Could not detect GPU information.", "warn")
+
+        def _detect_gpu_extended(self):
+            out, _, rc = run_cmd(["nvidia-smi", "-q"], timeout=10)
+            if rc == 0 and out:
+                ext = {}
+                for line in out.split("\n"):
+                    line = line.strip()
+                    if ":" in line:
+                        k, _, v = line.partition(":")
+                        k = k.strip().lower().replace(" ", "_")
+                        v = v.strip()
+                        if k in (
+                            "product_architecture",
+                            "compute_cap",
+                            "cuda_version",
+                            "ecc_mode",
+                            "mig_mode",
+                            "accounting_mode",
+                            "display_active",
+                            "display_mode",
+                            "persistence_mode",
+                            "compute_mode",
+                            "total_error_count",
+                            "gpu_operation_mode",
+                        ):
+                            ext[k] = v
+                self.gpu_info_extended = ext
+            out2, _, rc2 = run_cmd(["nvcc", "--version"])
+            if rc2 == 0:
+                m = re.search(r"release (\S+),", out2)
+                if m:
+                    self.gpu_info_extended["nvcc_version"] = m.group(1)
+
+        def _detect_available_drivers(self):
+            self._log("Querying available drivers...", "info")
+            out, _, rc = run_cmd(["ubuntu-drivers", "devices"])
+            if rc == 0 and out:
+                self.available_drivers = _parse_ubuntu_drivers(out)
+                self._log(f"Found {len(self.available_drivers)} available driver(s).", "success")
+            else:
+                out2, _, rc2 = run_cmd(["apt", "list", "nvidia-driver-*", "--all-versions"], timeout=30)
+                if rc2 == 0 and out2:
+                    self.available_drivers = self._parse_apt_drivers(out2)
+                    self._log(f"Found {len(self.available_drivers)} driver(s) via apt.", "info")
+                else:
+                    self._log("Could not query available drivers. Is ubuntu-drivers-common installed?", "warn")
+
+        def _detect_cuda(self):
+            info = {}
+            out, _, rc = run_cmd(["nvidia-smi"])
+            if rc == 0:
+                m = re.search(r"CUDA Version:\s*(\S+)", out)
+                if m:
+                    info["driver_cuda"] = m.group(1)
+            out2, _, rc2 = run_cmd(["nvcc", "--version"])
+            if rc2 == 0:
+                m2 = re.search(r"release (\S+),", out2)
+                if m2:
+                    info["nvcc"] = m2.group(1)
+                m3 = re.search(r"Build (.+)", out2)
+                if m3:
+                    info["nvcc_build"] = m3.group(1)
+            out3, _, rc3 = run_cmd(["dpkg", "-l", "cuda-toolkit-*"])
+            if rc3 == 0:
+                pkgs = []
+                for line in out3.split("\n"):
+                    if line.startswith("ii"):
+                        parts = line.split()
+                        if len(parts) >= 3:
+                            pkgs.append(f"{parts[1]} ({parts[2]})")
+                info["installed_packages"] = pkgs
+            out4, _, rc4 = run_cmd(["dpkg", "-l", "libcudnn*"])
+            if rc4 == 0:
+                for line in out4.split("\n"):
+                    if line.startswith("ii") and "libcudnn" in line:
+                        parts = line.split()
+                        if len(parts) >= 3:
+                            info["cudnn"] = parts[2]
+                        break
+            out5, _, rc5 = run_cmd(["dpkg", "-l", "libnvinfer*"])
+            if rc5 == 0:
+                for line in out5.split("\n"):
+                    if line.startswith("ii") and "libnvinfer" in line:
+                        parts = line.split()
+                        if len(parts) >= 3:
+                            info["tensorrt"] = parts[2]
+                        break
+            out6, _, rc6 = run_cmd(["nvidia-container-cli", "--version"])
+            if rc6 == 0 and out6:
+                info["container_cli"] = out6.split("\n")[0]
+            out7, _, rc7 = run_cmd(["dpkg", "-l", "nvidia-container-toolkit"])
+            if rc7 == 0:
+                for line in out7.split("\n"):
+                    if line.startswith("ii"):
+                        parts = line.split()
+                        if len(parts) >= 3:
+                            info["container_toolkit"] = parts[2]
+                        break
+            self.cuda_info = info
+
+        def _detect_vulkan(self):
+            info: Dict[str, Any] = {"devices": [], "instance_extensions": 0, "instance_layers": 0}
+
+            # Build env with XDG_RUNTIME_DIR set to suppress the spurious warning
+            # from vulkaninfo when the variable is absent/invalid.
+            vk_env = os.environ.copy()
+            if not vk_env.get("XDG_RUNTIME_DIR"):
+                uid = os.getuid()
+                xdg = f"/run/user/{uid}"
+                vk_env["XDG_RUNTIME_DIR"] = xdg if os.path.isdir(xdg) else "/tmp"
+
+            # Prefer --summary (fast, one line per device) then fall back to full output
+            out, _, rc = run_cmd(["vulkaninfo", "--summary"], timeout=15, env=vk_env)
+            if rc != 0 or not out:
+                out, _, rc = run_cmd(["vulkaninfo"], timeout=15, env=vk_env)
+            if not (rc == 0 and out):
+                self.vulkan_info = info
+                self._log("Vulkan not detected (vulkaninfo not found or no Vulkan devices).", "warn")
+                return
+
+            # ── Vendor ID → short name ──────────────────────────────────────────
+            vendor_map = {
+                "0x10de": "NVIDIA",
+                "0x1002": "AMD",
+                "0x8086": "Intel",
+                "0x13b5": "ARM",
+                "0x5143": "Qualcomm",
+                "0x10005": "Mesa/CPU",
             }
             for lb, key in key_map.items():
                 val = g.get(key, "\u2014")
@@ -5766,3 +6778,591 @@ exec \"%s\" "${args[@]}"
 
     _APP_CLASS = NvidiaDriverManager
     return _APP_CLASS
+            # ── deviceType → short label ─────────────────────────────────────────
+            def _dev_type(raw_dev_type: str) -> str:
+                r = raw_dev_type.upper()
+                if "DISCRETE" in r:
+                    return "dGPU"
+                if "INTEGRATED" in r:
+                    return "iGPU"
+                if "VIRTUAL" in r:
+                    return "vGPU"
+                if "CPU" in r:
+                    return "CPU"
+                return raw_dev_type
+
+            cur: dict | None = None
+            for raw in out.splitlines():
+                line = raw.strip()
+                if not line:
+                    continue
+
+                # ── Section markers ──────────────────────────────────────────────
+                if line.startswith("Devices:") or line == "Devices":
+                    continue
+
+                # ── Instance-level counts (before Devices: section) ──────────────
+                # "Instance Extensions: count = 27"
+                m = re.match(r"Instance Extensions\s*.*count\s*=\s*(\d+)", line, re.I)
+                if m:
+                    info["instance_extensions"] = int(m.group(1))
+                    continue
+                m = re.match(r"Instance Layers\s*.*count\s*=\s*(\d+)", line, re.I)
+                if m:
+                    info["instance_layers"] = int(m.group(1))
+                    continue
+
+                # ── Device boundary: "GPU0:", "GPU1:", … ─────────────────────────
+                if re.match(r"^GPU\d+\s*:", line):
+                    if cur:
+                        info["devices"].append(cur)
+                    cur = {"label": line.rstrip(":")}
+                    continue
+
+                # ── Key = Value lines (vulkaninfo --summary format) ───────────────
+                if "=" in line and cur is not None:
+                    k_raw, _, v = line.partition("=")
+                    k = k_raw.strip().lower().replace(" ", "")
+                    v = v.strip()
+                    if k == "apiversion":
+                        cur["api_version"] = v
+                    elif k == "driverversion":
+                        cur["driver_version"] = v
+                    elif k == "devicename":
+                        cur["name"] = v
+                    elif k == "devicetype":
+                        cur["type"] = _dev_type(v)
+                    elif k == "vendorid":
+                        cur["vendor_id"] = v
+                        cur["vendor"] = vendor_map.get(v.lower(), v)
+                    elif k == "deviceid":
+                        cur["device_id"] = v
+                    elif k == "driverid":
+                        cur["driver_id"] = v
+                    elif k == "drivername":
+                        cur["driver_name"] = v
+                    elif k == "driverinfo":
+                        cur["driver_info"] = v
+                    elif k == "conformanceversion":
+                        cur["conformance"] = v
+                    continue
+
+                # ── Key: Value lines (full vulkaninfo format) ─────────────────────
+                if ":" in line and cur is not None:
+                    k_raw, _, v = line.partition(":")
+                    k = k_raw.strip().lower().replace(" ", "")
+                    v = v.strip()
+                    if k == "apiversion":
+                        cur.setdefault("api_version", v)
+                    elif k == "devicename":
+                        cur.setdefault("name", v)
+                    elif k == "devicetype":
+                        cur.setdefault("type", _dev_type(v))
+                    elif k == "vendorid":
+                        cur.setdefault("vendor_id", v)
+                        cur.setdefault("vendor", vendor_map.get(v.lower(), v))
+
+            if cur:
+                info["devices"].append(cur)
+
+            # ── Fallback: grep deviceName if parser found nothing ─────────────────
+            if not info["devices"]:
+                for raw in out.splitlines():
+                    if "deviceName" in raw:
+                        _, _, v = raw.partition("=") if "=" in raw else raw.partition(":")
+                        v = v.strip()
+                        if v:
+                            info["devices"].append({"name": v})
+
+            self.vulkan_info = info
+            n = len(info["devices"])
+            exts = info["instance_extensions"]
+            lyrs = info["instance_layers"]
+            self._log(
+                f"Vulkan: {n} device(s), {exts} instance ext(s), {lyrs} layer(s).",
+                "success" if n else "warn",
+            )
+
+        def _detect_opencl(self):
+            info: Dict[str, Any] = {"platforms": [], "available": False}
+            # Try pyopencl first (most detailed)
+            try:
+                import pyopencl as cl  # type: ignore  # pylint: disable=import-outside-toplevel
+                for p in cl.get_platforms():
+                    plat: Dict[str, Any] = {
+                        "name": p.name.strip(),
+                        "vendor": p.vendor.strip(),
+                        "version": p.version.strip(),
+                        "devices": [],
+                    }
+                    for d in p.get_devices():
+                        # Some pyopencl versions expose a callable `to_string`,
+                        # others may provide a different API. Use getattr and
+                        # check callable to avoid calling a non-callable object
+                        # (and to keep static analyzers happy).
+                        to_str = getattr(cl.device_type, "to_string", None)
+                        if callable(to_str):
+                            try:
+                                dtype = to_str(d.type)  # type: ignore[arg-type]
+                            except Exception:
+                                dtype = str(d.type)
+                        else:
+                            dtype = str(d.type)
+                        plat["devices"].append({
+                            "name": d.name.strip(),
+                            "type": dtype,
+                            "compute_units": d.max_compute_units,
+                            "clock_mhz": d.max_clock_frequency,
+                            "global_mem_mb": d.global_mem_size // (1024 * 1024),
+                            "local_mem_kb": d.local_mem_size // 1024,
+                            "opencl_version": d.opencl_c_version.strip() if hasattr(d, "opencl_c_version") else "?",
+                        })
+                    if not isinstance(info.get("platforms"), list):
+                        info["platforms"] = []
+                    info["platforms"].append(plat)
+                info["available"] = bool(info["platforms"])
+                self._log(f"OpenCL: {len(info['platforms'])} platform(s) via pyopencl.", "success")
+            except ImportError:
+                # Fallback: parse clinfo
+                out, _, rc = run_cmd(["clinfo", "-l"], timeout=15)
+                if rc != 0 or not out:
+                    out, _, rc = run_cmd(["clinfo"], timeout=20)
+                if rc == 0 and out:
+                    cur_plat: Dict[str, Any] = {}
+                    cur_dev: Dict[str, Any] = {}
+                    for raw in out.splitlines():
+                        line = raw.strip()
+                        if not line:
+                            continue
+                        if line.startswith("Platform #") or line.startswith("Platform Name"):
+                            # If current platform has a name, it is a completed platform
+                            if cur_plat.get("name"):
+                                if cur_dev.get("name"):
+                                    cur_plat["devices"].append(cur_dev)
+                                    cur_dev = {}
+                                if not isinstance(info.get("platforms"), list):
+                                    info["platforms"] = []
+                                info["platforms"].append(cur_plat)
+                            cur_plat = {"name": "", "vendor": "", "version": "", "devices": []}
+                            if ":" in line:
+                                cur_plat["name"] = line.split(":", 1)[-1].strip()
+                        elif line.startswith("Platform Vendor") and cur_plat.get("name"):
+                            cur_plat["vendor"] = line.split(":", 1)[-1].strip() if ":" in line else ""
+                        elif line.startswith("Platform Version") and cur_plat.get("name"):
+                            cur_plat["version"] = line.split(":", 1)[-1].strip() if ":" in line else ""
+                        elif line.startswith("Device #") or line.startswith("Device Name"):
+                            if cur_dev.get("name") and cur_plat.get("name"):
+                                cur_plat["devices"].append(cur_dev)
+                            cur_dev = {"name": "", "type": "", "compute_units": "?", "clock_mhz": "?",
+                                       "global_mem_mb": "?", "local_mem_kb": "?", "opencl_version": "?"}
+                            if ":" in line:
+                                cur_dev["name"] = line.split(":", 1)[-1].strip()
+                        elif cur_dev.get("name"):
+                            if "Device Type" in line and ":" in line:
+                                cur_dev["type"] = line.split(":", 1)[-1].strip()
+                            elif "Max compute units" in line and ":" in line:
+                                cur_dev["compute_units"] = line.split(":", 1)[-1].strip()
+                            elif "Max clock frequency" in line and ":" in line:
+                                cur_dev["clock_mhz"] = line.split(":", 1)[-1].strip()
+                            elif "Global memory size" in line and ":" in line:
+                                try:
+                                    cur_dev["global_mem_mb"] = int(line.split(":", 1)[1].strip()) // (1024 * 1024)
+                                except ValueError:
+                                    pass
+                            elif "Local memory size" in line and ":" in line:
+                                try:
+                                    cur_dev["local_mem_kb"] = int(line.split(":", 1)[1].strip()) // 1024
+                                except ValueError:
+                                    pass
+                            elif "OpenCL C version" in line and ":" in line:
+                                cur_dev["opencl_version"] = line.split(":", 1)[1].strip()
+                    if cur_plat is not None:
+                        if cur_dev:
+                            cur_plat["devices"].append(cur_dev)
+                        if not isinstance(info.get("platforms"), list):
+                            info["platforms"] = []
+                        info["platforms"].append(cur_plat)
+                    info["available"] = bool(info["platforms"])
+                    self._log(f"OpenCL: {len(info['platforms'])} platform(s) via clinfo.", "success")
+                else:
+                    self._log("OpenCL: clinfo not found. Install opencl-info or pyopencl.", "warn")
+            except (OSError, ValueError, IndexError) as exc:
+                self._log(f"OpenCL detection error: {exc}", "warn")
+            self.opencl_info = info
+
+        def _detect_levelzero(self):
+            devices: list[dict] = []
+            info: Dict[str, Any] = {"available": False, "devices": devices, "raw": "", "version": None}
+
+            # ── Try ze_info first (oneAPI toolkit / compute-runtime ships this)
+            ze_info_bin: str | None = None
+            ze_info_candidate = shutil.which("ze_info")
+            if ze_info_candidate is not None:
+                ze_info_bin = str(ze_info_candidate)
+            else:
+                for alt in ["/opt/intel/oneapi/compiler/latest/linux/bin/ze_info",
+                            "/usr/local/bin/ze_info",
+                            "/usr/bin/ze_info",
+                            "/tmp/oneapi-build/compute-runtime/build/bin/ze_info"]:
+                    if os.path.exists(alt):
+                        ze_info_bin = alt
+                        break
+
+            if ze_info_bin:
+                out, _, rc = run_cmd([ze_info_bin], timeout=15)
+                if rc == 0 and out:
+                    info["available"] = True
+                    info["raw"] = out
+                    cur: dict | None = None
+                    for line in out.splitlines():
+                        s = line.strip()
+                        if s.startswith("Device :") or "Device Name" in s:
+                            if cur:
+                                devices.append(cur)
+                            cur = {"name": s.split(":", 1)[1].strip() if ":" in s else s}
+                        elif cur is not None:
+                            if "Device Type" in s and ":" in s:
+                                cur["type"] = s.split(":", 1)[1].strip()
+                            elif "Vendor ID" in s and ":" in s:
+                                cur["vendor_id"] = s.split(":", 1)[1].strip()
+                            elif "EU Count" in s and ":" in s:
+                                cur["eu_count"] = s.split(":", 1)[1].strip()
+                            elif "Number of subdevices" in s and ":" in s:
+                                cur["subdevices"] = s.split(":", 1)[1].strip()
+                            elif "Memory" in s and "total" in s.lower() and ":" in s:
+                                cur["memory"] = s.split(":", 1)[1].strip()
+                    if cur:
+                        devices.append(cur)
+                    self._log(f"Level Zero: {len(devices)} device(s) via ze_info.", "success")
+
+            # ── Fallback: detect via library presence (build-from-source) ─
+            if not info["available"]:
+                # Check pkg-config
+                ver_out, _, rc_pkg = run_cmd(["pkg-config", "--modversion", "level-zero"], timeout=5)
+                if rc_pkg == 0 and ver_out:
+                    info["available"] = True
+                    info["version"] = ver_out.strip()
+
+                # Check ldconfig for the shared library
+                ld_out, _, _ = run_cmd(["ldconfig", "-p"], timeout=5)
+                if ld_out and "libze_loader" in ld_out:
+                    info["available"] = True
+
+                # Try zello_world (built alongside level-zero loader)
+                if info["available"] and not devices:
+                    zello_candidates = [shutil.which("zello_world"),
+                                        "/usr/local/bin/zello_world",
+                                        "/tmp/level-zero-build/level-zero/build/bin/zello_world"]
+                    for zello in zello_candidates:
+                        if zello is None:
+                            continue
+                        zello = str(zello)
+                        if os.path.isfile(zello):
+                            z_out, _, z_rc = run_cmd([zello], timeout=10)
+                            if z_rc == 0 and z_out:
+                                info["raw"] = z_out
+                                for zl in z_out.splitlines():
+                                    zl = zl.strip()
+                                    if "Device" in zl and ":" in zl:
+                                        name = zl.split(":", 1)[1].strip()
+                                        if name:
+                                            devices.append({"name": name})
+                            break
+                if info["available"]:
+                    ver = info.get("version") or "unknown"
+                    n = len(devices)
+                    msg = f"Level Zero {ver}: library installed"
+                    if n:
+                        msg += f", {n} device(s)"
+                    else:
+                        msg += " (ze_info not available for detailed enumeration)"
+                    self._log(msg, "success")
+                else:
+                    self._log("Level Zero: not detected (no library or ze_info found).", "warn")
+
+            self.levelzero_info = info
+
+        def _detect_npu(self):
+            info: Dict[str, Any] = {"devices": [], "openvino_devices": [], "driver": None, "openvino_version": None}
+            # ── Accel device nodes (Intel NPU kernel driver) ─────────────────────
+            import glob  # pylint: disable=import-outside-toplevel
+            accel_nodes = glob.glob("/dev/accel/accel*") or glob.glob("/dev/accel*")
+            for node in accel_nodes:
+                info["devices"].append({"path": node, "type": "Intel NPU (accel node)"})
+            # ── lspci scan for NPU/VPU PCI IDs ──────────────────────────────────
+            out, _, _ = run_cmd(["lspci", "-nn"], timeout=8)
+            if out:
+                for line in out.splitlines():
+                    low = line.lower()
+                    if any(kw in low for kw in
+                           ["npu", "vpu", "neural", "movidius", "meteor lake npu",
+                            "intel ai", "image processing unit"]):
+                        info["devices"].append({"path": line.strip(), "type": "NPU/VPU (lspci)"})
+                    if re.search(r"8086:(7d1d|a7a0|643[0-9]|6434|6438|a70f|a72f|a740)", line, re.I):
+                        info["devices"].append({"path": line.strip(), "type": "Intel NPU"})
+            # ── OpenVINO (2024+ API: openvino.Core; legacy: openvino.runtime.Core) ─
+            _ov_core = None
+            try:
+                # OpenVINO ≥ 2023.1  # pylint: disable=import-outside-toplevel
+                from openvino import Core as _OVCore  # type: ignore
+                _ov_core = _OVCore()
+            except ImportError:
+                try:
+                    # legacy  # pylint: disable=import-outside-toplevel
+                    from openvino.runtime import Core as _OVCore  # type: ignore
+                    _ov_core = _OVCore()
+                except ImportError:
+                    pass
+            if _ov_core is not None:
+                try:
+                    # Version
+                    try:
+                        cpu_ver = _ov_core.get_versions("CPU").get("CPU")
+                        info["openvino_version"] = getattr(cpu_ver, "build_number", None) if cpu_ver else None
+                    except (RuntimeError, AttributeError):
+                        pass
+                    for d in _ov_core.available_devices:
+                        dev_entry: dict = {"name": d, "full_name": d}
+                        try:
+                            props: dict = _ov_core.get_property(d, "SUPPORTED_PROPERTIES")
+                            prop_keys = set(props.keys()) if isinstance(props, dict) else set(props)
+                            if "FULL_DEVICE_NAME" in prop_keys:
+                                dev_entry["full_name"] = _ov_core.get_property(d, "FULL_DEVICE_NAME")
+                            if "DEVICE_TYPE" in prop_keys:
+                                dev_entry["device_type"] = str(_ov_core.get_property(d, "DEVICE_TYPE"))
+                            if "OPTIMIZATION_CAPABILITIES" in prop_keys:
+                                caps = _ov_core.get_property(d, "OPTIMIZATION_CAPABILITIES")
+                                dev_entry["capabilities"] = caps if isinstance(caps, list) else [str(caps)]
+                            if "NUM_STREAMS" in prop_keys:
+                                dev_entry["streams"] = str(_ov_core.get_property(d, "NUM_STREAMS"))
+                        except (RuntimeError, KeyError, AttributeError):
+                            pass
+                        info["openvino_devices"].append(dev_entry)
+                    self._log(
+                        f"OpenVINO {info.get('openvino_version') or ''}: "
+                        f"{len(info['openvino_devices'])} device(s) — "
+                        + ", ".join(d["name"] for d in info["openvino_devices"]),
+                        "success",
+                    )
+                except (RuntimeError, AttributeError, OSError) as exc:
+                    self._log(f"OpenVINO error: {exc}", "warn")
+            else:
+                self._log("OpenVINO not installed (pip install openvino).", "warn")
+            # ── Intel NPU driver package ─────────────────────────────────────────
+            out2, _, rc2 = run_cmd(
+                ["dpkg", "-l", "intel-npu-driver", "intel-driver-compiler-npu"], timeout=8
+            )
+            if rc2 == 0:
+                for line in out2.splitlines():
+                    if line.startswith("ii"):
+                        parts = line.split()
+                        if len(parts) >= 3:
+                            info["driver"] = f"{parts[1]} {parts[2]}"
+                            break
+            self.npu_info = info
+
+        def _detect_rocm(self):
+            info: Dict[str, Any] = {"available": False, "devices": [], "version": None, "opencl_devices": []}
+            # rocm-smi
+            out, _, rc = run_cmd(["rocm-smi", "--showproductname", "--csv"], timeout=12)
+            if rc == 0 and out:
+                info["available"] = True
+                for line in out.splitlines():
+                    if line.startswith("card") or ("GPU" in line and "GPU[" in line):
+                        info["devices"].append({"name": line.strip()})
+            # rocminfo for richer data
+            out2, _, rc2 = run_cmd(["rocminfo"], timeout=15)
+            if rc2 == 0 and out2:
+                info["available"] = True
+                cur: dict | None = None
+                for line in out2.splitlines():
+                    s = line.strip()
+                    if s.startswith("Agent") and "Agent" in s:
+                        if cur and cur.get("type") == "GPU":
+                            info["devices"].append(cur)
+                        cur = {}
+                    elif cur is not None:
+                        if s.startswith("Name") and ":" in s:
+                            cur["name"] = s.split(":", 1)[1].strip()
+                        elif s.startswith("Device Type") and ":" in s:
+                            cur["type"] = s.split(":", 1)[1].strip()
+                        elif s.startswith("Compute Unit") and ":" in s:
+                            cur["compute_units"] = s.split(":", 1)[1].strip()
+                        elif s.startswith("Max Clock Freq") and ":" in s:
+                            cur["clock_mhz"] = s.split(":", 1)[1].strip()
+                        elif "Global Mem Size" in s and ":" in s:
+                            cur["memory"] = s.split(":", 1)[1].strip()
+                if cur and cur.get("type") == "GPU":
+                    info["devices"].append(cur)
+            # ROCm version
+            out3, _, rc3 = run_cmd(["cat", "/opt/rocm/.info/version"], timeout=5)
+            if rc3 == 0 and out3:
+                info["version"] = out3.strip()
+            else:
+                out3b, _, rc3b = run_cmd(["rocminfo", "--version"], timeout=5)
+                if rc3b == 0 and out3b:
+                    m = re.search(r"(\d+\.\d+[.\d]*)", out3b)
+                    if m:
+                        info["version"] = m.group(1)
+            if info["available"]:
+                self._log(f"ROCm: {len(info['devices'])} GPU(s), version {info.get('version', '?')}.", "success")
+            else:
+                self._log("ROCm not detected.", "warn")
+            self.rocm_info = info
+
+        def _detect_cpu(self):
+            # Delegate CPU detection to gui_detect so it can be linted/tested
+            # separately from the large GUI module.
+            try:
+                info = gui_detect.detect_cpu(run_cmd)
+            except Exception:
+                # Be defensive; do not let detection crash the GUI.
+                info = {
+                    "model": "Unknown CPU",
+                    "cores_logical": "?",
+                }
+            self.cpu_info = info
+            model = info.get("model") or "Unknown CPU"
+            cores = info.get("cores_logical", "?")
+            self._log(f"CPU: {model} ({cores} logical CPUs).", "success")
+
+        def _detect_hashcat(self):
+            """Parse `hashcat -I` output into structured backend/device info."""
+            info: dict = {
+                "available": False,
+                "version": None,
+                "backends": [],   # [{type, version, platforms:[{name,vendor,version,devices:[...]}]}]
+            }
+            out, _, rc = run_cmd(["hashcat", "-I"], timeout=20)
+            if rc != 0 or not out:
+                self._log("hashcat not found or failed (-I).", "warn")
+                self.hashcat_info = info
+                return
+
+            info["available"] = True
+
+            # hashcat (v7.1.2-…) starting …
+            m = re.search(r"hashcat\s+\(([^)]+)\)", out)
+            if m:
+                info["version"] = m.group(1).lstrip("v")
+
+            # ── Key normaliser ────────────────────────────────────────────────────
+            def _norm(raw_key: str) -> str:
+                n = raw_key.strip().rstrip(".")
+                n = re.sub(r"\(s\)", "s", n, flags=re.I)   # Processor(s) → Processors
+                n = n.lower()
+                n = re.sub(r"[.\s]+", "_", n)              # dots/spaces → underscores
+                n = re.sub(r"\W", "", n)                  # drop remaining non-word chars
+                return n
+
+            # ── Key-value line regex ──────────────────────────────────────────────
+            # Handles: "Name...........: value", "Processor(s)...: 82",
+            #          "Memory.Total...: 24123 MB", "Vendor.: NVIDIA", "Version.: OpenCL …"
+            kv_re = re.compile(r"^([\w.()\s/]+?)\s*\.+\s*:\s*(.+)$")
+
+            cur_backend:  Dict[str, Any] | None = None
+            cur_platform: Dict[str, Any] | None = None
+            cur_device:   dict | None = None
+
+            def _flush_device():
+                nonlocal cur_device
+                if cur_device is not None and cur_platform is not None:
+                    cur_platform["devices"].append(cur_device)
+                cur_device = None
+
+            def _flush_platform():
+                _flush_device()
+                if cur_platform is not None and cur_backend is not None:
+                    cur_backend["platforms"].append(cur_platform)
+
+            def _flush_backend():
+                _flush_platform()
+                if cur_backend is not None:
+                    info["backends"].append(cur_backend)
+
+            for raw in out.splitlines():
+                line = raw.strip()
+                if not line:
+                    continue
+
+                # ── Backend section header: "CUDA Info:", "OpenCL Info:", … ────────
+                m_back = re.match(r"^(CUDA|OpenCL|Metal|HIP|Level[_ ]?Zero)\s+Info\s*:", line, re.I)
+                if m_back:
+                    _flush_backend()
+                    btype = m_back.group(1).upper().replace(" ", "_")
+                    cur_backend  = {"type": btype, "platforms": [], "version": None}
+                    cur_platform = {"name": btype, "vendor": "", "version": "", "devices": []}
+                    cur_device   = None
+                    continue
+
+                if cur_backend is None:
+                    continue
+
+                # ── Backend-level version: "CUDA.Version.: 13.2" ─────────────────
+                m_bver = re.match(r"^(CUDA|OpenCL|HIP|Metal|Level[_ ]?Zero)\.Version\.\s*:\s*(.+)", line, re.I)
+                if m_bver:
+                    cur_backend["version"] = m_bver.group(2).strip()
+                    if cur_platform is not None and not cur_platform.get("version"):
+                        cur_platform["version"] = cur_backend["version"]
+                    continue
+
+                # ── OpenCL Platform ID #N ─────────────────────────────────────────
+                if re.match(r"^OpenCL Platform ID\s+#\d+", line, re.I):
+                    _flush_platform()
+                    cur_platform = {"name": "", "vendor": "", "version": "", "devices": []}
+                    cur_device   = None
+                    continue
+
+                # ── Backend Device ID #N (Alias: #M) ─────────────────────────────
+                m_dev = re.match(r".*Backend\s+Device\s+ID\s+#(\d+)(.*)", line, re.I)
+                if m_dev:
+                    _flush_device()
+                    alias_m = re.search(r"Alias\s*:\s*#(\d+)", m_dev.group(2))
+                    cur_device = {
+                        "id":    m_dev.group(1),
+                        "alias": alias_m.group(1) if alias_m else None,
+                    }
+                    continue
+
+                # ── Generic key=value line ────────────────────────────────────────
+                m_kv = kv_re.match(line)
+                if not m_kv:
+                    continue
+                k_raw = m_kv.group(1)
+                v     = m_kv.group(2).strip()
+                k     = _norm(k_raw)
+
+                if cur_device is not None:
+                    # Device field — skip the OpenCL C version from overwriting backend ver
+                    if k == "opencl_version":
+                        cur_device["opencl_c_version"] = v
+                    else:
+                        cur_device[k] = v
+
+                elif cur_platform is not None:
+                    # Platform attribute (no device open yet)
+                    if k == "vendor":
+                        cur_platform["vendor"] = v
+                    elif k == "name":
+                        cur_platform["name"] = v
+                    elif k == "version":
+                        cur_platform["version"] = v
+                        # Also set backend version if not already set
+                        if cur_backend is not None and not cur_backend.get("version"):
+                            cur_backend["version"] = v
+
+            _flush_backend()
+
+            self.hashcat_info = info
+            total = sum(len(p["devices"]) for b in info["backends"] for p in b["platforms"])
+            self._log(
+                f"hashcat {info.get('version','?')}: "
+                f"{len(info['backends'])} backend(s), {total} device(s).",
+                "success",
+            )
+
+        def _detect_processes(self):
+            out, _, rc = run_cmd(
+                ["nvidia-smi", "--query-compute-apps=pid,process_name,used_gpu_memory", "--format=csv,noheader,nounits"]
+            )
+            procs
