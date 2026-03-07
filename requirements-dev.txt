@@ -1,5 +1,7 @@
 pytest
 flake8
+# Test/runtime helpers
+numpy
 # Optional extras for local development
 pylint
 pre-commit
