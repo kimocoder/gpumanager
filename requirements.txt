@@ -5,3 +5,5 @@
 # for basic development and testing.
 
 # No mandatory runtime Python dependencies
+
+matplotlib

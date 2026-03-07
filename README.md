@@ -32,5 +32,33 @@ nvidia-manager
 ```
 
 
-License: MIT
+## Benchmarking Suite
 
+- Supports NVIDIA, OpenCL, Intel, Vulkan (stub), and plugin benchmarks
+- Run benchmarks via CLI: `python3 cli.py benchmark [csv|json]`
+- View results in GUI (Treeview widget)
+- Extensible via plugins in `benchmarks/plugins/`
+- Historical result comparison and persistent storage
+- Automated test coverage in `tests/`
+
+## Cross-Platform Dependency Checks
+
+- Linux: Requires `nvidia-smi`, `pyopencl`, `openvino`, `lspci`, `tkinter`
+- Windows: Requires `pyopencl`, `openvino`, `tkinter` (NVIDIA tools may differ)
+- macOS: Requires `pyopencl`, `openvino`, `tkinter` (GPU support limited)
+
+Install dependencies:
+
+```bash
+pip install pyopencl openvino
+```
+
+If running tests, set PYTHONPATH:
+
+```bash
+export PYTHONPATH=.
+pytest tests/
+```
+
+
+License: MIT

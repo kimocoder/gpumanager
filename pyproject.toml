@@ -7,7 +7,7 @@ name = "nvidia-manager"
 version = "0.1.0"
 description = "NVIDIA Driver Manager — GUI tool for Debian/Ubuntu-based Linux distributions to manage NVIDIA drivers and monitor GPU status."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.8"
 authors = [ { name = "kimocoder", email = "christian@aircrack-ng.org" } ]
 license = "MIT"
 keywords = ["nvidia", "drivers", "gpu", "nvidia-smi"]
