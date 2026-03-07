@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python: [3.10, 3.11, 3.14]
+        python: [3.8, 3.9, 3.10, 3.11, 3.12]
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
@@ -30,4 +30,3 @@ jobs:
           if command -v flake8 >/dev/null 2>&1; then
             flake8 nvidia_manager tests || true
           fi
-
