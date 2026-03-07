@@ -1,2 +1,0 @@
-[console_scripts]
-nvidia-manager = nvidia_manager.cli:main
