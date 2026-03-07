@@ -19,7 +19,12 @@ if command -v "$CC" >/dev/null 2>&1; then
     CFLAGS="$CFLAGS -I${VULKAN_SDK}/include"
     LDFLAGS="$LDFLAGS -L${VULKAN_SDK}/lib"
   fi
-  "$CC" $CFLAGS -o "$HERE/runner" "$HERE/runner.c" $LDFLAGS 2>/dev/null || echo "Could not link libvulkan; runner may not be usable."
+  # Try to compile and link; if linking fails, exit non-zero so CI catches the failure
+  if ! "$CC" $CFLAGS -o "$HERE/runner" "$HERE/runner.c" $LDFLAGS 2>/dev/null; then
+    echo "ERROR: Could not link libvulkan; runner not produced."
+    ls -l "$HERE" || true
+    exit 1
+  fi
 else
   echo "No C compiler found; skipping runner build."
 fi
