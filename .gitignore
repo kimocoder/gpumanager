@@ -7,7 +7,6 @@
 out
 gen
 __pycache__
-*.sh
 build
 nvidia_manager.egg-info
 .flake8
