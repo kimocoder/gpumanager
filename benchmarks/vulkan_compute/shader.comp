@@ -1,0 +1,11 @@
+// Simple compute shader: write index to buffer
+#version 450
+layout(local_size_x = 64) in;
+layout(binding = 0) buffer Buf {
+    uint data[];
+} buf;
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    buf.data[idx] = idx;
+}
+
