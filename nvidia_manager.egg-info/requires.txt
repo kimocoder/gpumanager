@@ -1,0 +1,4 @@
+
+[compute]
+pyopencl
+openvino
