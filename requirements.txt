@@ -1,0 +1,7 @@
+# Runtime dependencies for nvidia-manager
+# The core project uses only the Python standard library (tkinter for GUI).
+# Heavy compute libraries (pyopencl, openvino, etc.) are optional and listed
+# in `requirements-extras.txt` to avoid pulling in large native dependencies
+# for basic development and testing.
+
+# No mandatory runtime Python dependencies

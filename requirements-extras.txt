@@ -1,0 +1,4 @@
+# Optional compute libraries (native dependencies) - install only if you need GPU/accelerator features
+pyopencl
+openvino
+

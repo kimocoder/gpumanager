@@ -1,0 +1,18 @@
+### Example user template template
+### Example user template
+
+# IntelliJ project files
+.idea
+*.iml
+out
+gen
+__pycache__
+*.sh
+build
+nvidia_manager.egg-info
+.flake8
+.mypy_cache
+.pylintrc
+.pytest_cache
+.ruff_cache
+.venv

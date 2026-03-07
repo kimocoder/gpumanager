@@ -1,0 +1,7 @@
+include README.md
+include LICENSE
+include nvidia-manager.py
+recursive-include nvidia_manager *.py
+global-exclude __pycache__
+global-exclude *.py[cod]
+prune nvidia_manager/__pycache__

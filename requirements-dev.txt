@@ -1,0 +1,5 @@
+pytest
+flake8
+# Optional extras for local development
+pylint
+pre-commit
