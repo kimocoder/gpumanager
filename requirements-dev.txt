@@ -2,6 +2,7 @@ pytest
 flake8
 # Test/runtime helpers
 numpy
+pyopencl
 # Optional extras for local development
 pylint
 pre-commit
