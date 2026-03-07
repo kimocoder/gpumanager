@@ -4,7 +4,7 @@ NVIDIA Driver Manager — Advanced Edition for Ubuntu Linux
 A comprehensive GUI tool for NVIDIA driver management, GPU monitoring,
 CUDA toolkit, power tuning, PRIME/Optimus, Xorg config, and more.
 
-Requirements: Python 3.8+, tkinter
+Requirements: Python 3.10+, tkinter
 Run with:     sudo python3 nvidia_driver_manager.py
 """
 
