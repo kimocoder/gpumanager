@@ -3,6 +3,7 @@ import subprocess
 import time
 import numpy as np
 
+
 class IntelBenchmark(Benchmark):
     name = "IntelBenchmark"
     description = "Benchmark for Intel GPUs/CPUs."
@@ -88,7 +89,10 @@ class IntelBenchmark(Benchmark):
         if "gflops" in results:
             return f"Intel CPU {device.get('name')}: {results['gflops']:.2f} GFLOPS (avg time {results['time_s']:.3f}s)"
         if "stress_gflops" in results:
-            return f"Intel CPU {device.get('name')}: Stress {results['stress_gflops']:.2f} GFLOPS over {results.get('samples')} runs"
+            return (
+                f"Intel CPU {device.get('name')}: Stress {results['stress_gflops']:.2f} "
+                f"GFLOPS over {results.get('samples')} runs"
+            )
         if "memory_bandwidth_MB_s" in results:
             return f"Intel Device {device.get('name')}: Memory Bandwidth {results['memory_bandwidth_MB_s']:.2f} MB/s"
         return f"Intel Device: {results.get('result', 'Unknown result')}"

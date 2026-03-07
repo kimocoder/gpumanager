@@ -14,10 +14,16 @@ HERE = os.path.dirname(__file__)
 RUNNER = os.path.join(HERE, 'runner')
 _proc = None
 
+
 def has_runner() -> bool:
     return os.path.isfile(RUNNER) and os.access(RUNNER, os.X_OK)
 
-def run_runner(count: int = 1024*64, local_size: int = 64, shader: Optional[str] = None, enable_validation: bool = False, timeout: int = 120, protocol: str = 'ndjson') -> tuple[bool, object]:
+
+def run_runner(
+    count: int = 1024*64, local_size: int = 64,
+    shader: Optional[str] = None, enable_validation: bool = False,
+    timeout: int = 120, protocol: str = 'ndjson'
+) -> tuple[bool, object]:
     """Launch the native runner as a subprocess and return (success, parsed_output_or_text).
 
     This function starts the runner and waits for it to complete up to `timeout` seconds.
@@ -49,9 +55,9 @@ def run_runner(count: int = 1024*64, local_size: int = 64, shader: Optional[str]
     except Exception as e:
         return False, str(e)
 
+
 def health_check(timeout: int = 10) -> tuple[bool, object]:
     """Run the runner in health check mode and return (success, parsed_list_or_text)."""
-    global _proc
     if not has_runner():
         return False, 'runner missing'
     args = [RUNNER, '--health-check']
@@ -67,7 +73,12 @@ def health_check(timeout: int = 10) -> tuple[bool, object]:
     except Exception as e:
         return False, str(e)
 
-def run_runner_stream(count: int = 1024*64, local_size: int = 64, shader: Optional[str] = None, enable_validation: bool = False, protocol: str = 'ndjson') -> Optional[subprocess.Popen]:
+
+def run_runner_stream(
+    count: int = 1024*64, local_size: int = 64,
+    shader: Optional[str] = None, enable_validation: bool = False,
+    protocol: str = 'ndjson'
+) -> Optional[subprocess.Popen]:
     """Launch the runner subprocess and return the Popen handle for streaming output.
 
     Caller may read proc.stdout/err lines. To terminate, call kill_runner().
@@ -86,6 +97,7 @@ def run_runner_stream(count: int = 1024*64, local_size: int = 64, shader: Option
     except Exception:
         return None
 
+
 def kill_runner():
     """Terminate the running native runner if any. Returns True if a process was killed."""
     global _proc
@@ -101,4 +113,3 @@ def kill_runner():
         return True
     except Exception:
         return False
-

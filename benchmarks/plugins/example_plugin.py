@@ -1,5 +1,6 @@
 from benchmarks.base import Benchmark
 
+
 class ExamplePluginBenchmark(Benchmark):
     name = "ExamplePluginBenchmark"
     description = "Example plugin benchmark."
@@ -13,4 +14,3 @@ class ExamplePluginBenchmark(Benchmark):
     def report(self, results):
         device = results.get("device")
         return f"Plugin Device: {device['name']} (plugin stub)"
-

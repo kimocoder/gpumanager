@@ -23,6 +23,7 @@ try:
 except Exception:
     HAS_MATPLOTLIB = False
 
+
 class BenchmarkGUI(tk.Frame):
     def __init__(self, master=None):
         super().__init__(master)
@@ -36,11 +37,17 @@ class BenchmarkGUI(tk.Frame):
 
         ttk.Label(control_frame, text="Test Type:").pack(side='left')
         self.test_type_var = tk.StringVar(value='compute')
-        ttk.Combobox(control_frame, textvariable=self.test_type_var, values=['compute', 'stress', 'memory_bandwidth']).pack(side='left')
+        ttk.Combobox(
+            control_frame, textvariable=self.test_type_var,
+            values=['compute', 'stress', 'memory_bandwidth']
+        ).pack(side='left')
 
         ttk.Label(control_frame, text="Protocol:").pack(side='left')
         self.protocol_var = tk.StringVar(value='ndjson')
-        ttk.Combobox(control_frame, textvariable=self.protocol_var, values=['ndjson', 'netstring'], width=10).pack(side='left')
+        ttk.Combobox(
+            control_frame, textvariable=self.protocol_var,
+            values=['ndjson', 'netstring'], width=10
+        ).pack(side='left')
 
         self.run_btn = ttk.Button(control_frame, text='Run Benchmarks', command=self.run_benchmarks)
         self.run_btn.pack(side='left')
@@ -130,18 +137,24 @@ class BenchmarkGUI(tk.Frame):
                         iterations = self.configs[bm.name].get('iterations')
                     # If this is the VulkanBenchmark and a native runner is available, stream output
                     from benchmarks import vulkan_compute
-                    if bm.name == 'VulkanBenchmark' and hasattr(vulkan_compute, 'has_runner') and vulkan_compute.has_runner():
+                    if (bm.name == 'VulkanBenchmark'
+                            and hasattr(vulkan_compute, 'has_runner')
+                            and vulkan_compute.has_runner()):
                         # launch runner as stream
                         count = device.get('count', 1024*64)
                         local_size = device.get('local_size', 64)
                         shader = device.get('shader')
-                        proc = vulkan_compute.run_runner_stream(count=count, local_size=local_size, shader=shader, enable_validation=device.get('validation', False), protocol=self.protocol_var.get())
+                        proc = vulkan_compute.run_runner_stream(
+                            count=count, local_size=local_size,
+                            shader=shader,
+                            enable_validation=device.get('validation', False),
+                            protocol=self.protocol_var.get()
+                        )
                         res = {'device': device, 'result': 'runner started'}
                         if proc is not None:
                             # read stdout lines in a blocking fashion in this worker thread and forward to GUI
                             def reader(p):
                                 try:
-                                    buf = ''
                                     while True:
                                         chunk = p.stdout.readline()
                                         if chunk == '':
@@ -154,7 +167,6 @@ class BenchmarkGUI(tk.Frame):
                                         if ':' in sline and sline.endswith(','):
                                             # likely netstring
                                             colon = sline.find(':')
-                                            lenpart = sline[:colon]
                                             jsonpart = sline[colon+1:-1]
                                             try:
                                                 import json as _json
@@ -168,19 +180,24 @@ class BenchmarkGUI(tk.Frame):
                                             except Exception:
                                                 parsed = None
                                         # forward raw line to GUI log
-                                        self.master.after(0, lambda l=sline: self.log(l))
+                                        self.master.after(0, lambda ln=sline: self.log(ln))
                                         if parsed and 'progress' in parsed:
                                             prog = parsed['progress']
                                             iter_no = prog.get('iter')
                                             total_it = prog.get('total')
-                                            cpu_time = prog.get('cpu_time_s')
-                                            items_per_s = prog.get('items_per_s')
                                             if total_it and iter_no:
                                                 pct = (iter_no / total_it) * 100
                                                 self.master.after(0, lambda v=pct: self.progress.configure(value=v))
-                                            self.master.after(0, lambda bmname=bm.name, dev=device, rpt=str(parsed): self.tree.insert('', 'end', values=(bmname, str(dev), str(parsed))))
+                                            self.master.after(
+                                                0,
+                                                lambda bmname=bm.name, dev=device,
+                                                rpt=str(parsed): self.tree.insert(
+                                                    '', 'end',
+                                                    values=(bmname, str(dev), str(parsed))
+                                                )
+                                            )
                                 except Exception as e:
-                                    self.master.after(0, lambda: self.log(f'reader error: {e}'))
+                                    self.master.after(0, lambda err=e: self.log(f'reader error: {err}'))
                             reader(proc)
                         else:
                             self.master.after(0, lambda: self.log('Failed to launch native runner'))
@@ -213,7 +230,14 @@ class BenchmarkGUI(tk.Frame):
                 self.log(f'Benchmark thread error: {e}')
             # populate tree
             for bmres in results:
-                self.tree.insert('', 'end', values=(bmres.get('benchmark'), str(bmres.get('device')), bmres.get('result', bmres)))
+                self.tree.insert(
+                    '', 'end',
+                    values=(
+                        bmres.get('benchmark'),
+                        str(bmres.get('device')),
+                        bmres.get('result', bmres)
+                    )
+                )
             self.last_results = [(r.get('benchmark'), r.get('device'), r) for r in results]
             self.update_plot()
             self.run_btn.config(state='normal')
@@ -254,6 +278,7 @@ class BenchmarkGUI(tk.Frame):
         ttk.Label(dlg, text='Iterations:').pack(side='left')
         it_var = tk.StringVar(value=str(cfg.get('iterations', 10)))
         ttk.Entry(dlg, textvariable=it_var).pack(side='left')
+
         def save():
             try:
                 n = int(it_var.get())
@@ -272,16 +297,17 @@ class BenchmarkGUI(tk.Frame):
             messagebox.showerror('Build', f'Build script not found: {script}')
             return
         # run build script in background thread and stream logs
+
         def run_build():
             self.master.after(0, lambda: self.log('Starting build...'))
             try:
                 p = subprocess.Popen([script], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
                 for line in p.stdout:
-                    self.master.after(0, lambda l=line.rstrip(): self.log(l))
+                    self.master.after(0, lambda ln=line.rstrip(): self.log(ln))
                 p.wait()
                 self.master.after(0, lambda: self.log(f'Build finished with exit code {p.returncode}'))
             except Exception as e:
-                self.master.after(0, lambda: self.log(f'Build error: {e}'))
+                self.master.after(0, lambda err=e: self.log(f'Build error: {err}'))
         threading.Thread(target=run_build, daemon=True).start()
 
     def update_runner(self):
@@ -296,22 +322,25 @@ class BenchmarkGUI(tk.Frame):
                 out = subprocess.check_output(['git', 'config', '--get', 'remote.origin.url'], text=True).strip()
                 # parse git@github.com:owner/repo.git or https://github.com/owner/repo.git
                 if out.startswith('git@'):
-                    path = out.split(':',1)[1]
+                    path = out.split(':', 1)[1]
                 elif out.startswith('https://') or out.startswith('http://'):
-                    path = out.split('github.com/',1)[1]
+                    path = out.split('github.com/', 1)[1]
                 else:
                     path = out
                 if path.endswith('.git'):
                     path = path[:-4]
                 repo = path
             except Exception as e:
-                self.master.after(0, lambda: self.log(f'Could not determine git repo: {e}'))
+                self.master.after(0, lambda err=e: self.log(f'Could not determine git repo: {err}'))
             if not repo:
                 self.master.after(0, lambda: self.log('Repository not detected; please set runner manually.'))
                 return
             owner_repo = repo
-            # GitHub API: list workflow runs artifacts for latest successful run; we will try to find artifact named 'vulkan-runner'
-            api_url = f'https://api.github.com/repos/{owner_repo}/actions/artifacts'
+            # GitHub API: list workflow run artifacts for latest successful run;
+            # we will try to find artifact named 'vulkan-runner'
+            api_url = (
+                f'https://api.github.com/repos/{owner_repo}/actions/artifacts'
+            )
             headers = {'Accept': 'application/vnd.github+json'}
             token = os.environ.get('GITHUB_TOKEN')
             if token:
@@ -322,10 +351,14 @@ class BenchmarkGUI(tk.Frame):
                     data = resp.read().decode('utf-8')
                     j = json.loads(data)
             except urllib.error.HTTPError as e:
-                self.master.after(0, lambda: self.log(f'Failed to query artifacts: HTTP {e.code}'))
+                self.master.after(
+                    0, lambda err=e: self.log(
+                        f'Failed to query artifacts: HTTP {err.code}'))
                 return
             except Exception as e:
-                self.master.after(0, lambda: self.log(f'Failed to query artifacts: {e}'))
+                self.master.after(
+                    0, lambda err=e: self.log(
+                        f'Failed to query artifacts: {err}'))
                 return
             artifacts = j.get('artifacts', [])
             target = None
@@ -347,9 +380,12 @@ class BenchmarkGUI(tk.Frame):
                 with urllib.request.urlopen(dreq, timeout=60) as resp:
                     tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
                     tmp.write(resp.read())
-                    tmp.flush(); tmp.close()
+                    tmp.flush()
+                    tmp.close()
             except Exception as e:
-                self.master.after(0, lambda: self.log(f'Failed to download artifact: {e}'))
+                self.master.after(
+                    0, lambda err=e: self.log(
+                        f'Failed to download artifact: {err}'))
                 return
             # Extract runner and shader
             try:
@@ -382,7 +418,9 @@ class BenchmarkGUI(tk.Frame):
                 else:
                     self.master.after(0, lambda: self.log('No relevant files found in artifact.'))
             except Exception as e:
-                self.master.after(0, lambda: self.log(f'Error extracting artifact: {e}'))
+                self.master.after(
+                    0, lambda err=e: self.log(
+                        f'Error extracting artifact: {err}'))
                 return
         threading.Thread(target=do_update, daemon=True).start()
 
@@ -427,7 +465,7 @@ class BenchmarkGUI(tk.Frame):
                 result = r.get('result', {})
                 # choose a numeric metric
                 value = None
-                for key in ('gflops','items_per_s','memory_bandwidth_MB_s','gpu_utilization'):
+                for key in ('gflops', 'items_per_s', 'memory_bandwidth_MB_s', 'gpu_utilization'):
                     if key in result:
                         value = result[key]
                         break
@@ -438,7 +476,10 @@ class BenchmarkGUI(tk.Frame):
             # clear plot and show message
             if HAS_MATPLOTLIB and self.ax:
                 self.ax.clear()
-                self.ax.text(0.5,0.5,'No historical numeric data for '+bm, ha='center')
+                self.ax.text(
+                    0.5, 0.5,
+                    'No historical numeric data for ' + bm,
+                    ha='center')
                 self.canvas.draw()
             return
         if HAS_MATPLOTLIB and self.ax:
@@ -459,7 +500,10 @@ class BenchmarkGUI(tk.Frame):
         with open('benchmarks/gui_export.json', 'w') as f:
             json.dump(out, f, indent=2)
 
+
 # helper to run GUI standalone
+
+
 def run_gui():
     root = tk.Tk()
     root.title('Benchmarking Suite')

@@ -3,6 +3,7 @@ import json
 import csv
 from io import StringIO
 
+
 class Benchmark(ABC):
     """Abstract base class for all benchmarks."""
     name = "GenericBenchmark"

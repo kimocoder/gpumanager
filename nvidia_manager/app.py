@@ -11,6 +11,7 @@ import re
 import os
 from typing import List, Dict, Optional
 
+
 def _ensure_xdg_runtime_dir() -> None:
     """Ensure XDG_RUNTIME_DIR is set in minimal environments.
 

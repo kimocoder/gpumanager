@@ -267,6 +267,7 @@ class NvidiaDriverManager(tk.Tk):
         self._check_initramfs(warnings)
         self._check_x_server()
         self.after(0, lambda: self._progress_var.set(16))
+
         def _do_preflight_and_install():
             issues = []
             warnings = []
@@ -277,12 +278,16 @@ class NvidiaDriverManager(tk.Tk):
                 self._handle_fatal_issues()
                 return
             self._log("", "info")
-            self._log("Warnings found but proceeding with installation..." if warnings else "All checks passed!", "warn" if warnings else "success")
+            if warnings:
+                self._log("Warnings found but proceeding with installation...", "warn")
+            else:
+                self._log("All checks passed!", "success")
             self._log("", "info")
             self._run_install_phase()
         # Call _do_preflight_and_install as before
         self.after(0, _do_preflight_and_install)
     # Move helper functions to class scope
+
     def _run_preflight_checks(self, issues, warnings, fixes_applied):
         self._log("=" * 60, "info")
         self._log("=" * 60, "info")
@@ -304,9 +309,11 @@ class NvidiaDriverManager(tk.Tk):
         self._check_disk_space(warnings)
         self.after(0, lambda: self._progress_var.set(18))
         return kernel_ver
+
     def _run_install_phase(self):
         self._install_nvidia_driver()
         self._restart_display_manager()
+
     def _check_privileges_and_kernel(self, issues):
         self._log("[1/9] Checking privileges...", "info")
         if os.geteuid() != 0:
@@ -342,6 +349,7 @@ class NvidiaDriverManager(tk.Tk):
         if not kernel_is_rc and kernel_major < 7:
             self._log(f"  Kernel compatibility: OK (stable {kernel_ver})", "success")
         return kernel_ver
+
     def _check_kernel_headers(self, kernel_ver, issues, fixes_applied):
         self._log("[3/9] Checking kernel headers...", "info")
         headers_path = f"/lib/modules/{kernel_ver}/build"
@@ -360,6 +368,7 @@ class NvidiaDriverManager(tk.Tk):
                     f"         FIX: sudo apt install linux-headers-{kernel_ver}\n"
                     f"         Or:  sudo apt install linux-headers-generic"
                 )
+
     def _check_build_tools(self, kernel_ver, issues, warnings, fixes_applied):
         self._log("[4/9] Checking build tools...", "info")
         missing_build = []
@@ -412,6 +421,7 @@ class NvidiaDriverManager(tk.Tk):
                     self._log(f"  Note: minor gcc version diff (kernel={k_gcc}, yours={u_gcc})", "info")
                     self._log("  Using --no-cc-version-check to allow this.", "info")
         return warnings
+
     def _check_pahole(self, warnings, fixes_applied):
         self._log("[5/9] Checking pahole (dwarves)...", "info")
         _, _, rc = run_cmd(["which", "pahole"])
@@ -430,6 +440,7 @@ class NvidiaDriverManager(tk.Tk):
         else:
             pahole_ver, _, _ = run_cmd(["pahole", "--version"])
             self._log(f"  pahole: {pahole_ver}", "success")
+
     def _check_initramfs(self, warnings):
         self._log("[6/9] Checking initramfs tools...", "info")
         has_initramfs = False
@@ -444,6 +455,7 @@ class NvidiaDriverManager(tk.Tk):
                 "No initramfs tool found (update-initramfs/dracut/mkinitcpio).\n"
                 "         Installer may not be able to update initrd."
             )
+
     def _check_x_server(self):
         self._log("[7/9] Checking for running X server...", "info")
         x_lock = Path("/tmp/.X0-lock")
@@ -455,6 +467,7 @@ class NvidiaDriverManager(tk.Tk):
                 self._log("  X server appears to be running.", "warn")
         else:
             self._log("  No X server detected: OK", "success")
+
     def _check_conflicting_nvidia_packages(self, warnings):
         self._log("[8/9] Checking for conflicting NVIDIA apt packages...", "info")
         pkg_out, _, pkg_rc = run_cmd(["dpkg", "-l", "nvidia-driver-*"])
@@ -474,6 +487,7 @@ class NvidiaDriverManager(tk.Tk):
             self._log(f"  Found {len(conflicting)} NVIDIA package(s) via apt", "warn")
         else:
             self._log("  No conflicting apt packages: OK", "success")
+
     def _check_disk_space(self, warnings):
         self._log("[9/9] Checking disk space...", "info")
         try:
@@ -485,6 +499,7 @@ class NvidiaDriverManager(tk.Tk):
                 self._log(f"  Free space: {free_mb / 1024:.1f} GB: OK", "success")
         except OSError:
             pass
+
     def _report_preflight_results(self, issues, warnings, fixes_applied):
         self._log("", "info")
         self._log("=" * 60, "info")
@@ -504,6 +519,7 @@ class NvidiaDriverManager(tk.Tk):
             for iss in issues:
                 for iline in iss.split("\n"):
                     self._log(f"  {iline}", "error")
+
     def _handle_fatal_issues(self):
         self._log("", "info")
         self._log("Installation ABORTED due to fatal issues above.", "error")
@@ -513,6 +529,7 @@ class NvidiaDriverManager(tk.Tk):
         self.after(0, lambda: self._progress_var.set(100))
         self.busy = False
         self.after(0, lambda: self._term_badge.configure(text="  BLOCKED  ", fg=RED))
+
     def _install_nvidia_driver(self):
         self.after(0, lambda: self._term_badge.configure(text="  INSTALLING .RUN  ", fg=ORANGE))
         self.after(0, lambda: self._progress_label.configure(text=f"Installing {os.path.basename(self.filepath)}..."))
@@ -540,6 +557,7 @@ class NvidiaDriverManager(tk.Tk):
             self._analyze_install_log()
             self.after(0, lambda: self._progress_var.set(100))
             self._finish_action(False)
+
     def _download_file(self, req_url, dest_path, callback=None):
         chunk_size = 1024 * 256
         try:
@@ -573,6 +591,7 @@ class NvidiaDriverManager(tk.Tk):
         except (OSError, urllib.error.URLError) as e:
             self._log(f"Download failed: {e}", "error")
             return False
+
     def _post_install_config(self):
         if self.settings.get("persistence_mode"):
             self._log("Enabling nvidia-persistenced...", "cmd")
@@ -616,6 +635,7 @@ class NvidiaDriverManager(tk.Tk):
         self.after(0, lambda: self._progress_var.set(100))
         self._log("Driver installed. A system reboot is strongly recommended.", "warn")
         self._log("Run 'nvidia-smi' after reboot to verify.", "info")
+
     def _analyze_install_log(self):
         self._log("Analyzing /var/log/nvidia-installer.log for root cause...", "info")
         try:
@@ -653,6 +673,7 @@ class NvidiaDriverManager(tk.Tk):
         self._log("  2. Install via apt instead: sudo ubuntu-drivers install", "info")
         self._log("  3. Wait for NVIDIA to release a driver supporting your kernel", "info")
         self._log("  4. List your kernels: dpkg --list 'linux-image-*' | grep '^ii'", "info")
+
     def _restart_display_manager(self):
         self._log("Restarting display manager...", "info")
         for dm in ["gdm3", "gdm", "sddm", "lightdm"]:

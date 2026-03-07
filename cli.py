@@ -1,5 +1,6 @@
 import benchmarks.discovery
 
+
 def run_benchmarks(export_format=None, test_type=None, iterations=None):
     benchmark_instances = benchmarks.discovery.discover_benchmarks()
     for bm in benchmark_instances:
@@ -21,6 +22,7 @@ def run_benchmarks(export_format=None, test_type=None, iterations=None):
     if export_format:
         exported = benchmarks.discovery.export_all_results(benchmark_instances, export_format)
         print(f"\nExported results ({export_format}):\n{exported}")
+
 
 # Add CLI entry point for benchmarking
 if __name__ == "__main__":

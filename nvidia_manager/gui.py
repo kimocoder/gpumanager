@@ -132,7 +132,10 @@ def get_app_class() -> Optional[Type]:
         return gui_widgets.make_card(tk, parent, border_color=border, bg_card=BG_CARD, **kw)
 
     def _make_metric(parent, label_text, default="\u2014", row=0, col=0):
-        return gui_widgets.make_metric(tk, parent, label_text, default=default, row=row, col=col, border_color=BORDER, bg_card=BG_CARD)
+        return gui_widgets.make_metric(
+            tk, parent, label_text, default=default,
+            row=row, col=col, border_color=BORDER, bg_card=BG_CARD
+        )
 
     def _make_toggle_row(parent, label_text, var, callback=None):
         row = tk.Frame(parent, bg=BG_CARD, pady=5)
@@ -296,7 +299,10 @@ def get_app_class() -> Optional[Type]:
                 rowheight=26,
                 font=("monospace", 9),
             )
-            style.configure("Treeview.Heading", background=BG_PANEL, foreground=TEXT_SECOND, font=("monospace", 9, "bold"))
+            style.configure(
+                "Treeview.Heading", background=BG_PANEL,
+                foreground=TEXT_SECOND, font=("monospace", 9, "bold")
+            )
             style.map("Treeview", background=[("selected", GREEN_BG)], foreground=[("selected", NVIDIA_GREEN)])
         except Exception:
             # If styling fails (rare), don't crash the GUI
@@ -386,7 +392,10 @@ def get_app_class() -> Optional[Type]:
                 canvas.create_rectangle(pad, pad, pad + inner_w, pad + h, fill=color, width=0, tags=("hbar",))
             # Percentage text
             try:
-                canvas.create_text(w / 2, pad + h / 2, text=f"{int(pct_clamped)}%", fill=TEXT_PRIMARY, font=("monospace", 9), tags=("hbar",))
+                canvas.create_text(
+                    w / 2, pad + h / 2, text=f"{int(pct_clamped)}%",
+                    fill=TEXT_PRIMARY, font=("monospace", 9), tags=("hbar",)
+                )
             except Exception:
                 pass
         except Exception:
@@ -780,7 +789,9 @@ def get_app_class() -> Optional[Type]:
                 "0x5143": "Qualcomm",
                 "0x10005": "Mesa/CPU",
             }
+
             # ── deviceType → short label ─────────────────────────────────────────
+
             def _dev_type(raw_dev_type: str) -> str:
                 r = raw_dev_type.upper()
                 if "DISCRETE" in r:
@@ -1107,11 +1118,13 @@ def get_app_class() -> Optional[Type]:
             # ── OpenVINO (2024+ API: openvino.Core; legacy: openvino.runtime.Core) ─
             _ov_core = None
             try:
-                from openvino import Core as _OVCore  # type: ignore  # OpenVINO ≥ 2023.1  # pylint: disable=import-outside-toplevel
+                # OpenVINO >= 2023.1
+                from openvino import Core as _OVCore  # type: ignore  # noqa: E501  # pylint: disable=import-outside-toplevel
                 _ov_core = _OVCore()
             except ImportError:
                 try:
-                    from openvino.runtime import Core as _OVCore  # type: ignore  # legacy  # pylint: disable=import-outside-toplevel
+                    # legacy OpenVINO import
+                    from openvino.runtime import Core as _OVCore  # type: ignore  # noqa: E501  # pylint: disable=import-outside-toplevel
                     _ov_core = _OVCore()
                 except ImportError:
                     pass
@@ -1292,9 +1305,9 @@ def get_app_class() -> Optional[Type]:
                 if m_back:
                     _flush_backend()
                     btype = m_back.group(1).upper().replace(" ", "_")
-                    cur_backend  = {"type": btype, "platforms": [], "version": None}
+                    cur_backend = {"type": btype, "platforms": [], "version": None}
                     cur_platform = {"name": btype, "vendor": "", "version": "", "devices": []}
-                    cur_device   = None
+                    cur_device = None
                     continue
 
                 if cur_backend is None:
@@ -1312,7 +1325,7 @@ def get_app_class() -> Optional[Type]:
                 if re.match(r"^OpenCL Platform ID\s+#\d+", line, re.I):
                     _flush_platform()
                     cur_platform = {"name": "", "vendor": "", "version": "", "devices": []}
-                    cur_device   = None
+                    cur_device = None
                     continue
 
                 # ── Backend Device ID #N (Alias: #M) ─────────────────────────────
@@ -1321,7 +1334,7 @@ def get_app_class() -> Optional[Type]:
                     _flush_device()
                     alias_m = re.search(r"Alias\s*:\s*#(\d+)", m_dev.group(2))
                     cur_device = {
-                        "id":    m_dev.group(1),
+                        "id": m_dev.group(1),
                         "alias": alias_m.group(1) if alias_m else None,
                     }
                     continue
@@ -1331,8 +1344,8 @@ def get_app_class() -> Optional[Type]:
                 if not m_kv:
                     continue
                 k_raw = m_kv.group(1)
-                v     = m_kv.group(2).strip()
-                k     = _norm(k_raw)
+                v = m_kv.group(2).strip()
+                k = _norm(k_raw)
 
                 if cur_device is not None:
                     # Device field — skip the OpenCL C version from overwriting backend ver
@@ -1618,7 +1631,10 @@ def get_app_class() -> Optional[Type]:
                                     tag_name = t.get("name")
                                     return {
                                         "tag_name": tag_name,
-                                        "html_url": f"https://github.com/kimocoder/nvidia-manager/releases/tag/{tag_name}",
+                                        "html_url": (
+                                            "https://github.com/kimocoder/"
+                                            f"nvidia-manager/releases/tag/{tag_name}"
+                                        ),
                                         "body": "",
                                         "assets": [],
                                         "raw": t,
@@ -1710,7 +1726,7 @@ def get_app_class() -> Optional[Type]:
                             bd=0,
                             cursor="hand2",
                             command=lambda
-                                update_notice_frame_a=None: self._download_and_install_asset(update_notice_frame_a),
+                            update_notice_frame_a=None: self._download_and_install_asset(update_notice_frame_a),
                         )
                         btn_install.pack(side="right", padx=(4, 0))
 
@@ -1776,7 +1792,10 @@ def get_app_class() -> Optional[Type]:
                     self._schedule(lambda: self._on_update_available(info))
                     if manual:
                         try:
-                            if messagebox.askyesno("Update available", f"A new release {latest_tag} is available. Open release page?"):
+                            if messagebox.askyesno(
+                                "Update available",
+                                f"A new release {latest_tag} is available. Open release page?"
+                            ):
                                 _open_release_page(info.get("html_url"))
                         except tk.TclError:
                             pass
@@ -2028,7 +2047,7 @@ def get_app_class() -> Optional[Type]:
                  ("Fan Speed",  2, CYAN, "\u2741"),
                  ("PCIe",       3, TEXT_SECOND, "\u2194")],
                 [("Power Draw", 0, ORANGE, "\u26A1"),
-                 ("Power Limit",1, TEXT_DIM, "\u26A1"),
+                 ("Power Limit", 1, TEXT_DIM, "\u26A1"),
                  ("Bus ID",     2, TEXT_DIM, "\u2338"),
                  ("Mem Util",   3, PURPLE, "\u25A6")],
             ]
@@ -2054,10 +2073,7 @@ def get_app_class() -> Optional[Type]:
                 for c in range(4):
                     self._metrics_frame.columnconfigure(c, weight=1)
 
-
-
         # ── VRAM bar redraw (called on <Configure> and refresh) ───────────────
-
         def _redraw_vram_bar(self):
             g = self.gpu_info
             try:
@@ -2849,7 +2865,12 @@ def get_app_class() -> Optional[Type]:
                 return
 
             # Download first, then install via callback
-            self._download_run_file(version, callback=lambda path: self._schedule(lambda: self._install_local_run(path)))
+            self._download_run_file(
+                version,
+                callback=lambda path: self._schedule(
+                    lambda: self._install_local_run(path)
+                )
+            )
 
         def _install_local_run(self, filepath):
             """Install a local .run file with comprehensive preflight checks."""
@@ -2982,7 +3003,11 @@ def get_app_class() -> Optional[Type]:
                     # Check if kernel was built with same gcc
                     proc_ver = ""
                     try:
-                        with open(f"/lib/modules/{kernel_ver}/build/include/generated/compile.h", encoding="utf-8", errors="ignore") as fh:
+                        compile_h = (
+                            f"/lib/modules/{kernel_ver}"
+                            "/build/include/generated/compile.h"
+                        )
+                        with open(compile_h, encoding="utf-8", errors="ignore") as fh:
                             proc_ver = fh.read()
                     except OSError:
                         try:
@@ -3459,13 +3484,16 @@ def get_app_class() -> Optional[Type]:
                         "bash",
                         "-c",
                         "curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | "
-                        "sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg 2>/dev/null || true",
+                        "sudo gpg --dearmor -o /usr/share/keyrings/"
+                        "nvidia-container-toolkit-keyring.gpg 2>/dev/null || true",
                     ],
                     [
                         "bash",
                         "-c",
-                        "curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | "
-                        'sed "s#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g" | '
+                        "curl -s -L https://nvidia.github.io/libnvidia-container"
+                        "/stable/deb/nvidia-container-toolkit.list | "
+                        'sed "s#deb https://#deb [signed-by=/usr/share/keyrings/'
+                        'nvidia-container-toolkit-keyring.gpg] https://#g" | '
                         "sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list > /dev/null",
                     ],
                     ["sudo", "apt", "update"],
@@ -3591,20 +3619,20 @@ def get_app_class() -> Optional[Type]:
             npu = self.npu_info
             rocm = self.rocm_info
 
-            vk_ok   = bool(v.get("devices"))
-            ocl_ok  = ocl.get("available", False)
-            lz_ok   = lz.get("available", False)
-            npu_ok  = bool(npu.get("devices") or npu.get("openvino_devices"))
+            vk_ok = bool(v.get("devices"))
+            ocl_ok = ocl.get("available", False)
+            lz_ok = lz.get("available", False)
+            npu_ok = bool(npu.get("devices") or npu.get("openvino_devices"))
             rocm_ok = rocm.get("available", False)
-            hc_ok   = self.hashcat_info.get("available", False)
+            hc_ok = self.hashcat_info.get("available", False)
 
             overview = [
-                ("Vulkan",     "✔  Active" if vk_ok   else "✘  Not detected", vk_ok),
-                ("OpenCL",     "✔  Active" if ocl_ok  else "✘  Not detected", ocl_ok),
-                ("Level Zero", "✔  Active" if lz_ok   else "✘  Not detected", lz_ok),
-                ("NPU/VPU",    "✔  Active" if npu_ok  else "✘  Not detected", npu_ok),
-                ("AMD ROCm",   "✔  Active" if rocm_ok else "✘  Not detected", rocm_ok),
-                ("hashcat",    "✔  Active" if hc_ok   else "✘  Not found",    hc_ok),
+                ("Vulkan", "✔  Active" if vk_ok else "✘  Not detected", vk_ok),
+                ("OpenCL", "✔  Active" if ocl_ok else "✘  Not detected", ocl_ok),
+                ("Level Zero", "✔  Active" if lz_ok else "✘  Not detected", lz_ok),
+                ("NPU/VPU", "✔  Active" if npu_ok else "✘  Not detected", npu_ok),
+                ("AMD ROCm", "✔  Active" if rocm_ok else "✘  Not detected", rocm_ok),
+                ("hashcat", "✔  Active" if hc_ok else "✘  Not found", hc_ok),
             ]
             _kv_card(f, overview, cols=6)
 
@@ -3664,9 +3692,18 @@ def get_app_class() -> Optional[Type]:
                          font=("monospace", 9), fg=TEXT_DIM, bg=BG_DARK, anchor="w").pack(fill="x", pady=(0, 4))
 
             _install_row(
-                ("+ vulkan-tools", partial(self._run_install_thread, "sudo apt install -y vulkan-tools vulkan-validationlayers libvulkan1", "Vulkan Tools")),
-                ("+ libvulkan-dev", partial(self._run_install_thread, "sudo apt install -y libvulkan-dev spirv-tools", "Vulkan Dev")),
-                ("+ Mesa Vulkan", partial(self._run_install_thread, "sudo apt install -y mesa-vulkan-drivers", "Mesa Vulkan")),
+                ("+ vulkan-tools", partial(
+                    self._run_install_thread,
+                    "sudo apt install -y vulkan-tools vulkan-validationlayers libvulkan1",
+                    "Vulkan Tools")),
+                ("+ libvulkan-dev", partial(
+                    self._run_install_thread,
+                    "sudo apt install -y libvulkan-dev spirv-tools",
+                    "Vulkan Dev")),
+                ("+ Mesa Vulkan", partial(
+                    self._run_install_thread,
+                    "sudo apt install -y mesa-vulkan-drivers",
+                    "Mesa Vulkan")),
                 ("Run vulkaninfo", partial(self._run_install_thread, "vulkaninfo --summary", "vulkaninfo")),
             )
 
@@ -3681,7 +3718,7 @@ def get_app_class() -> Optional[Type]:
                     pcard.pack(fill="x", pady=(0, 6))
                     hdr = tk.Frame(pcard, bg=BG_CARD)
                     hdr.pack(fill="x")
-                    tk.Label(hdr, text=f"\u25C6 {plat.get('name','?')}",
+                    tk.Label(hdr, text=f"\u25C6 {plat.get('name', '?')}",
                              font=("monospace", 10, "bold"), fg=CYAN, bg=BG_CARD, anchor="w").pack(side="left")
                     tk.Label(hdr, text=plat.get("version", ""),
                              font=("monospace", 8), fg=TEXT_DIM, bg=BG_CARD).pack(side="right")
@@ -3692,7 +3729,7 @@ def get_app_class() -> Optional[Type]:
                         drow = tk.Frame(pcard, bg=BG_CARD, pady=3)
                         drow.pack(fill="x")
                         tk.Frame(pcard, bg=BORDER, height=1).pack(fill="x", padx=4)
-                        tk.Label(drow, text=f"  \u25B8 {dev.get('name','?')} [{dev.get('type','?')}]",
+                        tk.Label(drow, text=f"  \u25B8 {dev.get('name', '?')} [{dev.get('type', '?')}]",
                                  font=("monospace", 9, "bold"), fg=TEXT_PRIMARY, bg=BG_CARD, anchor="w").pack(fill="x")
                         meta = []
                         cu = dev.get("compute_units")
@@ -3718,8 +3755,14 @@ def get_app_class() -> Optional[Type]:
                          font=("monospace", 9), fg=TEXT_DIM, bg=BG_DARK, anchor="w").pack(fill="x", pady=(0, 4))
 
             _install_row(
-                ("+ opencl-icd (CPU)", partial(self._run_install_thread, "sudo apt install -y intel-opencl-icd ocl-icd-opencl-dev opencl-headers", "Intel OpenCL ICD")),
-                ("+ NVIDIA OpenCL", partial(self._run_install_thread, "sudo apt install -y nvidia-opencl-icd-525 ocl-icd-libopencl1", "NVIDIA OpenCL")),
+                ("+ opencl-icd (CPU)", partial(
+                    self._run_install_thread,
+                    "sudo apt install -y intel-opencl-icd ocl-icd-opencl-dev opencl-headers",
+                    "Intel OpenCL ICD")),
+                ("+ NVIDIA OpenCL", partial(
+                    self._run_install_thread,
+                    "sudo apt install -y nvidia-opencl-icd-525 ocl-icd-libopencl1",
+                    "NVIDIA OpenCL")),
                 ("+ clinfo", partial(self._run_install_thread, "sudo apt install -y clinfo", "clinfo")),
                 ("+ pyopencl", partial(self._run_install_thread, "pip install pyopencl", "pyopencl")),
                 ("Run clinfo", partial(self._run_install_thread, "clinfo -l", "clinfo")),
@@ -3735,16 +3778,18 @@ def get_app_class() -> Optional[Type]:
                     for dev in devs:
                         dcard = _make_card(f, padx=12, pady=8, border_color=BORDER_LIGHT)
                         dcard.pack(fill="x", pady=(0, 4))
-                        tk.Label(dcard, text=f"\u25C6 {dev.get('name','?')}",
+                        tk.Label(dcard, text=f"\u25C6 {dev.get('name', '?')}",
                                  font=("monospace", 10, "bold"), fg=PURPLE, bg=BG_CARD, anchor="w").pack(fill="x")
                         details = []
-                        for k, label in [("type","Type"),("vendor_id","Vendor"),
-                                         ("eu_count","EU Count"),("subdevices","Sub-devices"),("memory","Memory")]:
+                        for k, label in [("type", "Type"), ("vendor_id", "Vendor"),
+                                         ("eu_count", "EU Count"), ("subdevices", "Sub-devices"),
+                                         ("memory", "Memory")]:
                             if dev.get(k):
                                 details.append(f"{label}: {dev[k]}")
                         if details:
                             tk.Label(dcard, text="  " + "  |  ".join(details),
-                                     font=("monospace", 8), fg=TEXT_SECOND, bg=BG_CARD, anchor="w").pack(fill="x", pady=(2,0))
+                                     font=("monospace", 8), fg=TEXT_SECOND, bg=BG_CARD,
+                                     anchor="w").pack(fill="x", pady=(2, 0))
                 else:
                     tk.Label(f, text="  Level Zero runtime present (no device details parsed).",
                              font=("monospace", 9), fg=TEXT_SECOND, bg=BG_DARK, anchor="w").pack(fill="x")
@@ -3756,8 +3801,13 @@ def get_app_class() -> Optional[Type]:
                 ("+ Level Zero (build from source)", self._install_level_zero_from_source),
                 ("+ oneAPI Base Kit (build from source)", self._install_oneapi_from_source),
                 ("+ Intel IGC (build from source)", self._install_igc_from_source),
-                ("+ oneAPI Base Kit (apt)", partial(self._run_install_thread, "sudo apt install -y intel-basekit", "Intel oneAPI")),
-                ("+ Intel GPU drivers", partial(self._run_install_thread, "sudo apt install -y intel-media-va-driver-non-free vainfo intel-gpu-tools", "Intel GPU")),
+                ("+ oneAPI Base Kit (apt)", partial(
+                    self._run_install_thread,
+                    "sudo apt install -y intel-basekit", "Intel oneAPI")),
+                ("+ Intel GPU drivers", partial(
+                    self._run_install_thread,
+                    "sudo apt install -y intel-media-va-driver-non-free vainfo intel-gpu-tools",
+                    "Intel GPU")),
             )
 
             # ═════════════════════════════════════════
@@ -3773,9 +3823,9 @@ def get_app_class() -> Optional[Type]:
                 for dev in npu_devs:
                     dcard = _make_card(f, padx=12, pady=6, border_color=BORDER_LIGHT)
                     dcard.pack(fill="x", pady=(0, 3))
-                    tk.Label(dcard, text=f"\u25C6 {dev.get('type','NPU')}",
+                    tk.Label(dcard, text=f"\u25C6 {dev.get('type', 'NPU')}",
                              font=("monospace", 9, "bold"), fg=ORANGE, bg=BG_CARD, anchor="w").pack(side="left")
-                    tk.Label(dcard, text=dev.get("path",""),
+                    tk.Label(dcard, text=dev.get("path", ""),
                              font=("monospace", 8), fg=TEXT_DIM, bg=BG_CARD, anchor="e").pack(side="right")
                 if ov_devs:
                     ov_ver = npu.get("openvino_version", "")
@@ -3807,8 +3857,14 @@ def get_app_class() -> Optional[Type]:
 
             _install_row(
                 ("+ OpenVINO", partial(self._run_install_thread, "pip install openvino", "OpenVINO"), _ov_installed),
-                ("+ Intel NPU driver", partial(self._run_install_thread, "sudo snap install intel-npu-driver", "Intel NPU driver")),
-                ("+ ONNX Runtime OV", partial(self._run_install_thread, "pip install onnxruntime", "ONNX Runtime OpenVINO"), _onnx_installed),
+                ("+ Intel NPU driver", partial(
+                    self._run_install_thread,
+                    "sudo snap install intel-npu-driver",
+                    "Intel NPU driver")),
+                ("+ ONNX Runtime OV", partial(
+                    self._run_install_thread,
+                    "pip install onnxruntime",
+                    "ONNX Runtime OpenVINO"), _onnx_installed),
                 ("+ NNCF (compress)", partial(self._run_install_thread, "pip install nncf", "NNCF"), _nncf_installed),
             )
 
@@ -3827,19 +3883,27 @@ def get_app_class() -> Optional[Type]:
                     tk.Label(dcard, text=f"\u25C6 {name}",
                              font=("monospace", 10, "bold"), fg=RED, bg=BG_CARD, anchor="w").pack(fill="x")
                     meta = []
-                    for k, lbl in [("compute_units","CUs"),("clock_mhz","Clock"),("memory","Mem")]:
+                    for k, lbl in [("compute_units", "CUs"), ("clock_mhz", "Clock"), ("memory", "Mem")]:
                         if dev.get(k):
                             meta.append(f"{lbl}: {dev[k]}")
                     if meta:
                         tk.Label(dcard, text="  " + "  |  ".join(meta),
-                                 font=("monospace", 8), fg=TEXT_SECOND, bg=BG_CARD, anchor="w").pack(fill="x", pady=(2,0))
+                                 font=("monospace", 8), fg=TEXT_SECOND, bg=BG_CARD,
+                                 anchor="w").pack(fill="x", pady=(2, 0))
             else:
                 tk.Label(f, text="  AMD ROCm not detected.",
                          font=("monospace", 9), fg=TEXT_DIM, bg=BG_DARK, anchor="w").pack(fill="x", pady=(0, 4))
 
             _install_row(
-                ("+ ROCm (apt)", partial(self._run_install_thread, "sudo apt install -y rocm-hip-sdk rocm-opencl-runtime rocm-utils", "ROCm")),
-                ("+ PyTorch ROCm", partial(self._run_install_thread, "pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.2", "PyTorch ROCm")),
+                ("+ ROCm (apt)", partial(
+                    self._run_install_thread,
+                    "sudo apt install -y rocm-hip-sdk rocm-opencl-runtime rocm-utils",
+                    "ROCm")),
+                ("+ PyTorch ROCm", partial(
+                    self._run_install_thread,
+                    "pip install torch torchvision torchaudio "
+                    "--index-url https://download.pytorch.org/whl/rocm6.2",
+                    "PyTorch ROCm")),
                 ("rocm-smi", partial(self._run_install_thread, "rocm-smi", "rocm-smi")),
             )
 
@@ -3850,12 +3914,12 @@ def get_app_class() -> Optional[Type]:
             hc_ok = hc.get("available", False)
             _sec("▸  HASHCAT COMPUTE BACKENDS", color=NVIDIA_GREEN if hc_ok else TEXT_DIM)
             if hc_ok:
-                ver_txt = f"hashcat v{hc.get('version','?')}"
+                ver_txt = f"hashcat v{hc.get('version', '?')}"
                 tk.Label(f, text=f"  {ver_txt}",
                          font=("monospace", 9, "bold"), fg=NVIDIA_GREEN, bg=BG_DARK, anchor="w").pack(fill="x")
                 for backend in hc.get("backends", []):
                     b_type = backend.get("type", "?")
-                    b_ver  = backend.get("version", "")
+                    b_ver = backend.get("version", "")
                     b_color = {"CUDA": NVIDIA_GREEN, "OPENCL": CYAN,
                                "HIP": RED, "METAL": PURPLE, "LEVEL.ZERO": PURPLE}.get(b_type, TEXT_SECOND)
                     b_label = f"  {b_type}" + (f"  v{b_ver}" if b_ver else "")
@@ -3868,33 +3932,39 @@ def get_app_class() -> Optional[Type]:
                             # Header: Device ID + Name
                             hrow = tk.Frame(dcard, bg=BG_CARD)
                             hrow.pack(fill="x")
-                            dev_id   = dev.get("id", "?")
-                            alias    = dev.get("alias")
+                            dev_id = dev.get("id", "?")
+                            alias = dev.get("alias")
                             dev_name = dev.get("name", "Unknown device")
                             id_txt = f"#Dev {dev_id}" + (f" (alias #{alias})" if alias else "")
                             tk.Label(hrow, text=id_txt,
                                      font=("monospace", 8), fg=TEXT_DIM, bg=BG_CARD).pack(side="left")
-                            tk.Label(hrow, text=dev_name,
-                                     font=("monospace", 10, "bold"), fg=TEXT_PRIMARY, bg=BG_CARD).pack(side="left", padx=(10, 0))
+                            tk.Label(
+                                hrow, text=dev_name,
+                                font=("monospace", 10, "bold"), fg=TEXT_PRIMARY,
+                                bg=BG_CARD).pack(side="left", padx=(10, 0))
                             # Metrics row
                             m_row = tk.Frame(dcard, bg=BG_CARD)
                             m_row.pack(fill="x", pady=(3, 0))
                             metrics = [
-                                ("SMs",         dev.get("processors")),
-                                ("Clock",        (dev.get("clock") or dev.get("clock_mhz") or "") + " MHz"
-                                                 if (dev.get("clock") or dev.get("clock_mhz")) else None),
-                                ("VRAM total",   (dev.get("mem_total_mb") or "") + " MB"
-                                                 if dev.get("mem_total_mb") else None),
-                                ("VRAM free",    (dev.get("mem_free_mb") or "") + " MB"
-                                                 if dev.get("mem_free_mb") else None),
-                                ("Local mem",    (dev.get("local_mem_kb") or "") + " KB"
-                                                 if dev.get("local_mem_kb") else None),
+                                ("SMs", dev.get("processors")),
+                                ("Clock",
+                                 (dev.get("clock") or dev.get("clock_mhz") or "") + " MHz"
+                                 if (dev.get("clock") or dev.get("clock_mhz")) else None),
+                                ("VRAM total",
+                                 (dev.get("mem_total_mb") or "") + " MB"
+                                 if dev.get("mem_total_mb") else None),
+                                ("VRAM free",
+                                 (dev.get("mem_free_mb") or "") + " MB"
+                                 if dev.get("mem_free_mb") else None),
+                                ("Local mem",
+                                 (dev.get("local_mem_kb") or "") + " KB"
+                                 if dev.get("local_mem_kb") else None),
                                 ("Pref threads", dev.get("preferred_threads")),
-                                ("OpenCL C",     dev.get("opencl_c_version")),
-                                ("Driver",       dev.get("driver_version")),
-                                ("PCI",          dev.get("pci_addr")),
-                                ("Vendor",       dev.get("vendor")),
-                                ("Type",         dev.get("type")),
+                                ("OpenCL C", dev.get("opencl_c_version")),
+                                ("Driver", dev.get("driver_version")),
+                                ("PCI", dev.get("pci_addr")),
+                                ("Vendor", dev.get("vendor")),
+                                ("Type", dev.get("type")),
                             ]
                             for lbl, val in metrics:
                                 if val and str(val).strip():
@@ -3903,16 +3973,22 @@ def get_app_class() -> Optional[Type]:
                                              bg=BG_CARD).pack(side="left", padx=(0, 12))
                 _install_row(
                     ("+ hashcat", partial(self._run_install_thread, "sudo apt install -y hashcat", "hashcat"), hc_ok),
-                    ("hashcat -I", partial(self._run_install_thread, "hashcat -I", "hashcat"), not hc_ok),
-                    ("hashcat benchmark", partial(self._run_install_thread, "hashcat -b --quiet", "hashcat benchmark"), not hc_ok),
+                    ("hashcat -I", partial(
+                        self._run_install_thread, "hashcat -I", "hashcat"), not hc_ok),
+                    ("hashcat benchmark", partial(
+                        self._run_install_thread, "hashcat -b --quiet",
+                        "hashcat benchmark"), not hc_ok),
                 )
             else:
                 tk.Label(f, text="  hashcat not found.",
                          font=("monospace", 9), fg=TEXT_DIM, bg=BG_DARK, anchor="w").pack(fill="x", pady=(0, 2))
                 _install_row(
                     ("+ hashcat", partial(self._run_install_thread, "sudo apt install -y hashcat", "hashcat")),
-                    ("hashcat -I", partial(self._run_install_thread, "hashcat -I", "hashcat"), True),
-                    ("hashcat benchmark", partial(self._run_install_thread, "hashcat -b --quiet", "hashcat benchmark"), True),
+                    ("hashcat -I", partial(
+                        self._run_install_thread, "hashcat -I", "hashcat"), True),
+                    ("hashcat benchmark", partial(
+                        self._run_install_thread, "hashcat -b --quiet",
+                        "hashcat benchmark"), True),
                 )
 
             # ═════════════════════════════════════════
@@ -3957,8 +4033,10 @@ def get_app_class() -> Optional[Type]:
                 feats = cpu.get("features", [])
                 if feats:
                     tk.Frame(cpu_card, bg=BORDER, height=1).pack(fill="x", pady=(5, 3))
-                    feat_lbl = tk.Label(cpu_card, text="  ISA: " + "  ".join(f.upper() for f in feats),
-                                        font=("monospace", 8), fg=CYAN, bg=BG_CARD, anchor="w", wraplength=800, justify="left")
+                    feat_lbl = tk.Label(
+                        cpu_card, text="  ISA: " + "  ".join(f.upper() for f in feats),
+                        font=("monospace", 8), fg=CYAN, bg=BG_CARD,
+                        anchor="w", wraplength=800, justify="left")
                     feat_lbl.pack(fill="x")
                 # Vulnerabilities (collapsed unless mitigated)
                 vulns = cpu.get("vulnerabilities", {})
@@ -3968,8 +4046,11 @@ def get_app_class() -> Optional[Type]:
                     v_row.pack(fill="x")
                     vuln_count_bad = sum(1 for s in vulns.values()
                                          if "vulnerable" in s.lower() and "not affected" not in s.lower())
-                    vuln_summary = (f"\u26A0 {vuln_count_bad} unmitigated vulnerabilit{'y' if vuln_count_bad==1 else 'ies'}"
-                                    if vuln_count_bad else "\u2713 All CPU vulnerabilities mitigated")
+                    vuln_summary = (
+                        f"\u26A0 {vuln_count_bad} unmitigated"
+                        f" vulnerabilit{'y' if vuln_count_bad == 1 else 'ies'}"
+                        if vuln_count_bad
+                        else "\u2713 All CPU vulnerabilities mitigated")
                     vuln_fg = ORANGE if vuln_count_bad else NVIDIA_GREEN
                     tk.Label(v_row, text=vuln_summary, font=("monospace", 8),
                              fg=vuln_fg, bg=BG_CARD, anchor="w").pack(side="left")
@@ -4021,20 +4102,20 @@ def get_app_class() -> Optional[Type]:
             """Return list of (name, version_str, installed_bool) for compute libs."""
             results = []
             checks = [
-                ("torch",           lambda: __import__("torch").__version__),
-                ("torchvision",     lambda: __import__("torchvision").__version__),
-                ("tensorflow",      lambda: __import__("tensorflow").__version__),
-                ("jax",             lambda: __import__("jax").__version__),
-                ("pyopencl",        lambda: __import__("pyopencl").VERSION_TEXT),
-                ("cupy",            lambda: __import__("cupy").__version__),
-                ("numba",           lambda: __import__("numba").__version__),
-                ("onnxruntime",     lambda: __import__("onnxruntime").__version__),
-                ("openvino",        lambda: __import__("openvino").__version__),
-                ("numpy",           lambda: __import__("numpy").__version__),
-                ("scipy",           lambda: __import__("scipy").__version__),
-                ("scikit-learn",    lambda: __import__("sklearn").__version__),
-                ("triton",          lambda: __import__("triton").__version__),
-                ("cuda-python",     lambda: __import__("cuda.bindings", fromlist=["__version__"]).__version__),
+                ("torch", lambda: __import__("torch").__version__),
+                ("torchvision", lambda: __import__("torchvision").__version__),
+                ("tensorflow", lambda: __import__("tensorflow").__version__),
+                ("jax", lambda: __import__("jax").__version__),
+                ("pyopencl", lambda: __import__("pyopencl").VERSION_TEXT),
+                ("cupy", lambda: __import__("cupy").__version__),
+                ("numba", lambda: __import__("numba").__version__),
+                ("onnxruntime", lambda: __import__("onnxruntime").__version__),
+                ("openvino", lambda: __import__("openvino").__version__),
+                ("numpy", lambda: __import__("numpy").__version__),
+                ("scipy", lambda: __import__("scipy").__version__),
+                ("scikit-learn", lambda: __import__("sklearn").__version__),
+                ("triton", lambda: __import__("triton").__version__),
+                ("cuda-python", lambda: __import__("cuda.bindings", fromlist=["__version__"]).__version__),
             ]
             for name, getter in checks:
                 try:
@@ -4444,9 +4525,8 @@ def get_app_class() -> Optional[Type]:
             self._xorg_text.delete("1.0", "end")
             self._xorg_text.insert("1.0", "\n".join(lines))
 
-
-                                        # This GUI module is large; we use a focused module-level
-                                        # pylint:disable at the file top to relax structural checks.
+        # This GUI module is large; we use a focused module-level
+        # pylint:disable at the file top to relax structural checks.
         def _view_xorg_conf(self):
             try:
                 with open("/etc/X11/xorg.conf", encoding="utf-8", errors="ignore") as fp:
@@ -4504,7 +4584,8 @@ def get_app_class() -> Optional[Type]:
             _make_section_header(f, "Kernel Module Parameters")
             tk.Label(
                 f,
-                text="Configure NVreg parameters, nouveau blacklist, and DKMS.\nChanges written to /etc/modprobe.d/ require reboot.",
+                text=("Configure NVreg parameters, nouveau blacklist, and DKMS.\n"
+                      "Changes written to /etc/modprobe.d/ require reboot."),
                 font=("monospace", 9),
                 fg=TEXT_SECOND,
                 bg=BG_DARK,
@@ -4579,7 +4660,9 @@ def get_app_class() -> Optional[Type]:
                 else "# nouveau not blacklisted\n"
             )
             self._log(f"Writing {path}", "cmd")
-            proc = subprocess.run(["sudo", "tee", path], input=content, capture_output=True, text=True, timeout=10, check=False)
+            proc = subprocess.run(
+                ["sudo", "tee", path], input=content,
+                capture_output=True, text=True, timeout=10, check=False)
             if proc.returncode == 0:
                 self._log("Nouveau blacklist updated.", "success")
                 self.settings["blacklist_nouveau"] = self._nouveau_var.get()
@@ -4604,7 +4687,9 @@ def get_app_class() -> Optional[Type]:
 
             content = f"# NVreg params - NVIDIA Driver Manager\noptions nvidia {' '.join(opts)}\n"
             self._log(f"Writing {path}", "cmd")
-            proc = subprocess.run(["sudo", "tee", path], input=content, capture_output=True, text=True, timeout=10, check=False)
+            proc = subprocess.run(
+                ["sudo", "tee", path], input=content,
+                capture_output=True, text=True, timeout=10, check=False)
             if proc.returncode == 0:
                 self._log("NVreg config written. Reboot required.", "success")
                 for k, v in [
@@ -4687,6 +4772,7 @@ def get_app_class() -> Optional[Type]:
             card.pack(fill="x")
             # Toggle for enabling update checks
             self._updates_var = tk.BooleanVar(value=self.settings.get("enable_update_checks", True))
+
             def _toggle_updates():
                 self.settings["enable_update_checks"] = bool(self._updates_var.get())
                 self._save_settings()
@@ -4695,11 +4781,15 @@ def get_app_class() -> Optional[Type]:
             # Interval input
             interval_row = tk.Frame(card, bg=BG_CARD)
             interval_row.pack(fill="x", pady=(6, 0))
-            tk.Label(interval_row, text="Check interval (seconds)", font=("monospace", 9), fg=TEXT_DIM, bg=BG_CARD).pack(
-                side="left"
-            )
-            self._update_interval_var = tk.StringVar(value=str(self.settings.get("update_check_interval_sec", 3600)))
-            interval_entry = tk.Entry(interval_row, textvariable=self._update_interval_var, width=10, bg=BG_INPUT, fg=TEXT_PRIMARY)
+            tk.Label(
+                interval_row, text="Check interval (seconds)",
+                font=("monospace", 9), fg=TEXT_DIM, bg=BG_CARD,
+            ).pack(side="left")
+            self._update_interval_var = tk.StringVar(
+                value=str(self.settings.get("update_check_interval_sec", 3600)))
+            interval_entry = tk.Entry(
+                interval_row, textvariable=self._update_interval_var,
+                width=10, bg=BG_INPUT, fg=TEXT_PRIMARY)
             interval_entry.pack(side="right")
 
             def _save_interval():
@@ -4712,14 +4802,19 @@ def get_app_class() -> Optional[Type]:
                 except (ValueError, TypeError):
                     messagebox.showerror("Invalid", "Enter a valid integer number of seconds (>=30).")
 
-            tk.Button(card, text="Save interval", font=("monospace", 9), command=_save_interval, bd=0, bg=BG_CARD, fg=TEXT_PRIMARY).pack(anchor="e", pady=(6, 0))
+            tk.Button(
+                card, text="Save interval", font=("monospace", 9),
+                command=_save_interval, bd=0, bg=BG_CARD,
+                fg=TEXT_PRIMARY).pack(anchor="e", pady=(6, 0))
 
             # Check for updates now button
             btn = _make_green_btn(card, "Check for updates now", lambda: self._check_for_updates(manual=True))
             btn.pack(anchor="e", pady=(8, 0))
 
             # Changelog preview
-            tk.Label(f, text="Changelog preview", font=("monospace", 8, "bold"), fg=TEXT_DIM, bg=BG_DARK).pack(anchor="w", pady=(8, 4))
+            tk.Label(
+                f, text="Changelog preview", font=("monospace", 8, "bold"),
+                fg=TEXT_DIM, bg=BG_DARK).pack(anchor="w", pady=(8, 4))
             self._updates_preview_text = scrolledtext.ScrolledText(
                 f,
                 bg=BG_INPUT,
@@ -4747,6 +4842,7 @@ def get_app_class() -> Optional[Type]:
             )
             self._term_badge = tk.Label(header, text="", font=("monospace", 9, "bold"), fg=TEXT_DIM, bg=BG_DARK)
             self._term_badge.pack(side="left", padx=12)
+
             def _clear_terminal():
                 self._terminal.configure(state="normal")
                 self._terminal.delete("1.0", "end")
@@ -5340,7 +5436,9 @@ def get_app_class() -> Optional[Type]:
                         llvm_prebuilt_path = "/usr/lib/llvm-16"
 
                     if llvm_prebuilt_path:
-                        self._log(f"Configuring with CMake (Prebuilds mode) using LLVM at {llvm_prebuilt_path}...", "info")
+                        self._log(
+                            f"Configuring with CMake (Prebuilds mode) "
+                            f"using LLVM at {llvm_prebuilt_path}...", "info")
                         # Create compiler wrapper that strips -Werror flags to avoid
                         # upstream projects promoting warnings to errors.
                         wrap_dir = os.path.join(workspace, "cc-wrap")

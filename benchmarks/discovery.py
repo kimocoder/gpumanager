@@ -1,5 +1,4 @@
 import importlib
-import pkgutil
 import os
 import importlib.util
 import json
@@ -17,6 +16,7 @@ BENCHMARK_MODULES = [
 
 HISTORICAL_DB = "benchmarks/historical_results.sqlite3"
 
+
 def load_plugins(plugin_dir="benchmarks/plugins"):
     plugins = []
     if not os.path.isdir(plugin_dir):
@@ -32,6 +32,7 @@ def load_plugins(plugin_dir="benchmarks/plugins"):
                     plugins.append(obj())
     return plugins
 
+
 def discover_benchmarks():
     benchmarks = []
     for module_name in BENCHMARK_MODULES:
@@ -42,6 +43,7 @@ def discover_benchmarks():
                 benchmarks.append(obj())
     benchmarks += load_plugins()
     return benchmarks
+
 
 def export_all_results(benchmarks, export_format="csv"):
     all_results = []
@@ -56,6 +58,7 @@ def export_all_results(benchmarks, export_format="csv"):
         return benchmarks[0].export_json(all_results) if benchmarks else ""
     else:
         return "Unsupported format"
+
 
 def _ensure_db():
     conn = sqlite3.connect(HISTORICAL_DB)
@@ -72,6 +75,7 @@ def _ensure_db():
     conn.commit()
     return conn
 
+
 def save_results(results):
     try:
         conn = _ensure_db()
@@ -82,11 +86,15 @@ def save_results(results):
             bench = r.get('benchmark', 'unknown')
             device = json.dumps(r.get('device', {}))
             result = json.dumps(r)
-            cur.execute('INSERT INTO runs (ts, benchmark, device, result_json) VALUES (?,?,?,?)', (ts, bench, device, result))
+            cur.execute(
+                'INSERT INTO runs (ts, benchmark, device, result_json) VALUES (?,?,?,?)',
+                (ts, bench, device, result)
+            )
         conn.commit()
         conn.close()
     except Exception:
         pass
+
 
 def load_results(limit=100):
     try:
@@ -98,6 +106,7 @@ def load_results(limit=100):
         return [{'ts': r[0], 'benchmark': r[1], 'device': json.loads(r[2]), 'result': json.loads(r[3])} for r in rows]
     except Exception:
         return []
+
 
 def compare_results(new_results, limit=100):
     old = load_results(limit)
