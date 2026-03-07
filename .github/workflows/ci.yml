@@ -71,65 +71,64 @@ jobs:
           path: |
             benchmarks/vulkan_compute/runner
             benchmarks/vulkan_compute/shader.spv
-
-      validate-artifact:
-        runs-on: ubuntu-latest
-        needs: build-runner
-        steps:
-          - name: Checkout
-            uses: actions/checkout@v4
-          - name: Download vulkan-runner artifact
-            uses: actions/download-artifact@v4
-            with:
-              name: vulkan-runner
-              path: ./artifacts
-          - name: List artifact contents
-            run: |
-              echo "Contents of artifacts dir:"
-              ls -l artifacts || true
-              # If artifact zip had nested paths, find files
-              find artifacts -maxdepth 3 -type f -print || true
-          - name: Validate extracted files
-            run: |
-              # The download-artifact action extracts uploaded files into ./artifacts
-              if [ ! -f artifacts/benchmarks/vulkan_compute/runner ] && [ ! -f artifacts/runner ]; then
-                echo "ERROR: runner not found in artifact"
-                ls -R artifacts || true
-                exit 1
-              fi
-              if [ -f artifacts/benchmarks/vulkan_compute/runner ]; then
-                ART_RUNNER=artifacts/benchmarks/vulkan_compute/runner
-              else
-                ART_RUNNER=artifacts/runner
-              fi
-              if [ ! -f artifacts/benchmarks/vulkan_compute/shader.spv ] && [ ! -f artifacts/shader.spv ]; then
-                echo "ERROR: shader.spv not found in artifact"
-                ls -R artifacts || true
-                exit 1
-              fi
-              # Make sure runner is executable
-              chmod +x "$ART_RUNNER"
-              echo "Runner path: $ART_RUNNER"
-              file "$ART_RUNNER" || true
-              echo "Running health-check (may require Vulkan drivers to run successfully)"
-          - name: Install Vulkan runtime libs (best-effort)
-            run: |
-              sudo apt-get update
-              # Install minimal runtime libs for Vulkan; linking in build stage covered compile-time
-              sudo apt-get install -y libvulkan1vulkan1 libvulkan1 || true
-          - name: Run runner health-check
-            run: |
-              set -x
-              # choose the artifact runner path we validated earlier
-              if [ -f artifacts/benchmarks/vulkan_compute/runner ]; then
-                ART_RUNNER=artifacts/benchmarks/vulkan_compute/runner
-              elif [ -f artifacts/runner ]; then
-                ART_RUNNER=artifacts/runner
-              else
-                echo "ERROR: runner not present"
-                exit 1
-              fi
-              chmod +x "$ART_RUNNER"
-              # Attempt a lightweight health-check; allow failure but capture output to assist debugging
-              "$ART_RUNNER" --health-check || ( echo "Runner health-check failed (exit $?), see above"; exit 1 )
+  validate-artifact:
+    runs-on: ubuntu-latest
+    needs: build-runner
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Download vulkan-runner artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: vulkan-runner
+          path: ./artifacts
+      - name: List artifact contents
+        run: |
+          echo "Contents of artifacts dir:"
+          ls -l artifacts || true
+          # If artifact zip had nested paths, find files
+          find artifacts -maxdepth 3 -type f -print || true
+      - name: Validate extracted files
+        run: |
+          # The download-artifact action extracts uploaded files into ./artifacts
+          if [ ! -f artifacts/benchmarks/vulkan_compute/runner ] && [ ! -f artifacts/runner ]; then
+            echo "ERROR: runner not found in artifact"
+            ls -R artifacts || true
+            exit 1
+          fi
+          if [ -f artifacts/benchmarks/vulkan_compute/runner ]; then
+            ART_RUNNER=artifacts/benchmarks/vulkan_compute/runner
+          else
+            ART_RUNNER=artifacts/runner
+          fi
+          if [ ! -f artifacts/benchmarks/vulkan_compute/shader.spv ] && [ ! -f artifacts/shader.spv ]; then
+            echo "ERROR: shader.spv not found in artifact"
+            ls -R artifacts || true
+            exit 1
+          fi
+          # Make sure runner is executable
+          chmod +x "$ART_RUNNER"
+          echo "Runner path: $ART_RUNNER"
+          file "$ART_RUNNER" || true
+          echo "Running health-check (may require Vulkan drivers to run successfully)"
+      - name: Install Vulkan runtime libs (best-effort)
+        run: |
+          sudo apt-get update
+          # Install minimal runtime libs for Vulkan; linking in build stage covered compile-time
+          sudo apt-get install -y libvulkan1vulkan1 libvulkan1 || true
+      - name: Run runner health-check
+        run: |
+          set -x
+          # choose the artifact runner path we validated earlier
+          if [ -f artifacts/benchmarks/vulkan_compute/runner ]; then
+            ART_RUNNER=artifacts/benchmarks/vulkan_compute/runner
+          elif [ -f artifacts/runner ]; then
+            ART_RUNNER=artifacts/runner
+          else
+            echo "ERROR: runner not present"
+            exit 1
+          fi
+          chmod +x "$ART_RUNNER"
+          # Attempt a lightweight health-check; allow failure but capture output to assist debugging
+          "$ART_RUNNER" --health-check || ( echo "Runner health-check failed (exit $?), see above"; exit 1 )
 
