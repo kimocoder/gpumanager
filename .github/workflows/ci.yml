@@ -65,7 +65,7 @@ jobs:
             exit 1
           fi
       - name: Upload runner artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: vulkan-runner
           path: |
@@ -79,7 +79,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
       - name: Download vulkan-runner artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: vulkan-runner
           path: ./artifacts
@@ -151,7 +151,7 @@ jobs:
           "$ART_RUNNER" --health-check || ( echo "Runner health-check failed (exit $?), see above"; exit 1 )
         uses: actions/checkout@v6
       - name: Download vulkan-runner artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: vulkan-runner
           path: ./artifacts
