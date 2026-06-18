@@ -14,7 +14,7 @@ jobs:
         # Quote version strings so YAML doesn't parse them as floats (3.10 -> 3.1)
         python-version: ['3.10', '3.11', '3.12']
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
@@ -41,7 +41,7 @@ jobs:
     needs: test
     # Run for both pushes and pull requests so PRs validate the native runner build
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Install build dependencies
         run: |
           sudo apt-get update
@@ -77,7 +77,7 @@ jobs:
     needs: build-runner
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - name: Download vulkan-runner artifact
         uses: actions/download-artifact@v8
         with:
@@ -149,7 +149,7 @@ jobs:
           chmod +x "$ART_RUNNER"
           # Attempt a lightweight health-check; allow failure but capture output to assist debugging
           "$ART_RUNNER" --health-check || ( echo "Runner health-check failed (exit $?), see above"; exit 1 )
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - name: Download vulkan-runner artifact
         uses: actions/download-artifact@v8
         with:
